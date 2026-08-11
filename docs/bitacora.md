@@ -200,3 +200,74 @@ cualquier CI que parta de un checkout.
   máquina; si algún día hay dos, hay que publicar la imagen en GHCR.
 - El respaldo de la base está documentado como cron en `docs/despliegue.md`, pero no
   verificado. Un respaldo que nunca se restauró no es un respaldo.
+
+---
+
+## 2026-08-11 — Arranque en plataformas sin `depends_on` (Easypanel)
+
+### Qué se construyó
+
+El despliegue real se hace en Easypanel, donde cada servicio es un contenedor suelto y no
+existe `depends_on`. El repo asumía lo contrario —un contenedor `migraciones` que corre y
+termina antes que los demás— así que tal cual no arrancaba ahí.
+
+- `docker/arrancar.sh` como entrypoint de la imagen, controlado por variables:
+  `ESPERAR_BD`, `ESPERAR_BD_TIMEOUT`, `EJECUTAR_MIGRACIONES` y `SERVICIO`.
+- `investing-bot esperar-bd`, que bloquea hasta que PostgreSQL acepte consultas.
+- Reescritura automática de `postgres://` y `postgresql://` a `postgresql+asyncpg://`.
+- `docs/easypanel.md` con el procedimiento de los cuatro servicios.
+
+### Qué se midió
+
+Simulación del escenario exacto: contenedores sueltos en una red común, sin `depends_on`,
+levantando **la aplicación antes que la base** a propósito.
+
+| Comprobación | Resultado |
+|---|---|
+| App arranca sin base disponible | `esperando_bd` ×3, sin reventar |
+| Base aparece 20 s después | `bd_disponible intentos=4` |
+| Migraciones y siembra automáticas | `upgrade -> d847ecd0e7e3`, `whitelist_sembrada nuevas=30` |
+| Dashboard tras la secuencia | `Uvicorn running`, `/salud` → `{"estado":"ok"}` |
+| Ingesta desde otro contenedor | 2700 barras, 0 errores |
+| `SERVICIO=planificador` | levanta APScheduler, ignora el CMD `api` de la imagen |
+| Base inalcanzable | falla con código 1 tras agotar el plazo, no cuelga |
+| Tests | 81 pasan |
+
+### Qué se decidió
+
+**1. Variables de entorno en vez de sobreescribir el comando.**
+
+Los tres procesos (`api`, `bot`, `planificador`) salen de la misma imagen. Se podría
+distinguirlos con un *command override* en cada servicio, pero en estos paneles cambiar una
+variable es más cómodo y menos frágil que un campo de comando que cada versión de la UI
+coloca en otro sitio. `SERVICIO` manda sobre el `CMD`; si no está definida, el `CMD` se
+respeta y Docker Compose sigue funcionando exactamente igual que antes.
+
+**2. `ESPERAR_BD` por defecto en `false`.**
+
+Tentador ponerlo en `true` para que "simplemente funcione". Se descartó: haría que cualquier
+comando puntual (`investing-bot --version`, entrar a la terminal del contenedor) se quedara
+esperando hasta 90 s una base que quizá ni se necesita. Lo activa quien lo necesita, y el
+bloque de variables de `docs/easypanel.md` ya lo trae puesto.
+
+**3. La URL de la base se reescribe sola.**
+
+Easypanel, Railway y Heroku entregan la cadena como `postgres://`. SQLAlchemy resuelve ese
+esquema a psycopg2, un driver síncrono que el proyecto no instala, y el arranque falla con
+un error que no explica nada. Pegar la URL tal cual como la muestra el panel tiene que
+funcionar; obligar a editarla a mano es una trampa que se cobra la primera vez y cada vez
+que se rota la contraseña. La reescritura respeta contraseñas que contengan la subcadena
+`postgres`, y hay un test que lo fija.
+
+**4. Las migraciones las aplica un solo servicio, el del dashboard.**
+
+Alembic toma un lock y `sembrar` es idempotente, así que hacerlo en los tres no corrompería
+nada — pero tampoco aporta. `EJECUTAR_MIGRACIONES=true` va solo en `investing`.
+
+### Pendiente
+
+- El dashboard sigue sin autenticación propia. En Easypanel se resuelve con el Basic Auth de
+  la pestaña Security, que es una capa del proxy, no de la aplicación. Si alguna vez se
+  expone fuera de ese proxy, hace falta auth de verdad.
+- No hay despliegue automático por push. Easypanel puede hacerlo con un webhook de GitHub;
+  no está configurado.

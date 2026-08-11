@@ -16,6 +16,25 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 RAIZ_PAQUETE = Path(__file__).resolve().parent
 RAIZ_PROYECTO = RAIZ_PAQUETE.parent.parent
 
+# Prefijos que entregan los PaaS al crear una base gestionada.
+_PREFIJOS_SINCRONOS = ("postgres://", "postgresql://")
+_PREFIJO_ASYNC = "postgresql+asyncpg://"
+
+
+def forzar_driver_asyncpg(url: str) -> str:
+    """Reescribe la URL para que use asyncpg.
+
+    Easypanel, Railway y Heroku entregan la cadena de conexion como
+    `postgres://...` o `postgresql://...`. SQLAlchemy resolveria eso a
+    psycopg2, un driver sincrono que este proyecto no instala, y el arranque
+    fallaria con un error que no dice nada util. Pegar la URL tal cual como la
+    da el panel tiene que funcionar.
+    """
+    for prefijo in _PREFIJOS_SINCRONOS:
+        if url.startswith(prefijo):
+            return _PREFIJO_ASYNC + url[len(prefijo) :]
+    return url
+
 
 class Configuracion(BaseSettings):
     """Parametros del sistema, leidos del entorno o de `.env`."""
@@ -88,7 +107,7 @@ class Configuracion(BaseSettings):
     def url_bd_async(self) -> str:
         """URL de conexion asincrona (asyncpg) que usa la aplicacion."""
         if self.url_bd:
-            return self.url_bd
+            return forzar_driver_asyncpg(self.url_bd)
         return (
             f"postgresql+asyncpg://{self.postgres_user}:{self.postgres_password}"
             f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"

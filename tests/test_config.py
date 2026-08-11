@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from investing_bot.config import RAIZ_PROYECTO, Configuracion
+from investing_bot.config import RAIZ_PROYECTO, Configuracion, forzar_driver_asyncpg
 
 # Los dos ultimos tests verifican higiene del *repositorio*, no comportamiento
 # de la aplicacion, asi que no aplican cuando la suite corre dentro de la
@@ -31,6 +31,36 @@ def test_url_bd_se_construye_desde_las_partes() -> None:
 def test_url_bd_explicita_tiene_prioridad() -> None:
     config = Configuracion(url_bd="postgresql+asyncpg://otro@host/db", _env_file=None)
     assert config.url_bd_async == "postgresql+asyncpg://otro@host/db"
+
+
+@pytest.mark.parametrize(
+    "entregada",
+    [
+        "postgres://usuario:clave@thelonec_db:5432/investing_bot",
+        "postgresql://usuario:clave@thelonec_db:5432/investing_bot",
+    ],
+)
+def test_la_url_de_un_paas_se_reescribe_a_asyncpg(entregada: str) -> None:
+    """Easypanel, Railway y Heroku entregan `postgres://`; hay que pegarla tal cual.
+
+    Sin la reescritura, SQLAlchemy buscaria psycopg2 —que el proyecto no
+    instala— y el arranque fallaria con un error que no explica nada.
+    """
+    config = Configuracion(url_bd=entregada, _env_file=None)
+    assert config.url_bd_async == (
+        "postgresql+asyncpg://usuario:clave@thelonec_db:5432/investing_bot"
+    )
+
+
+def test_la_reescritura_no_toca_una_url_que_ya_es_correcta() -> None:
+    ya_async = "postgresql+asyncpg://u:c@host:5432/db"
+    assert forzar_driver_asyncpg(ya_async) == ya_async
+
+
+def test_la_reescritura_no_rompe_la_clave_del_usuario() -> None:
+    """Una contrasena generada puede contener la subcadena `postgres`."""
+    url = "postgres://investing:postgres_abc123@db:5432/investing_bot"
+    assert forzar_driver_asyncpg(url).endswith("investing:postgres_abc123@db:5432/investing_bot")
 
 
 def test_telegram_requiere_token_y_chat() -> None:

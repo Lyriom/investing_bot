@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import sys
+import time
 from pathlib import Path
 
 from investing_bot import __version__
@@ -47,6 +48,44 @@ def comando_migrar(_: argparse.Namespace) -> int:
     command.upgrade(configuracion, "head")
     log.info("migraciones_aplicadas")
     return 0
+
+
+def comando_esperar_bd(args: argparse.Namespace) -> int:
+    """Bloquea hasta que PostgreSQL acepte consultas, o hasta agotar el plazo.
+
+    En Docker Compose esto lo resuelve `depends_on: service_healthy`, pero en
+    plataformas donde cada servicio es un contenedor suelto (Easypanel,
+    Railway) no hay tal garantia: sin esta espera, el contenedor arranca antes
+    que la base, revienta y entra en un ciclo de reinicios.
+    """
+    import sqlalchemy as sa
+
+    async def ejecutar() -> int:
+        limite = time.monotonic() + args.timeout
+        intento = 0
+        while True:
+            intento += 1
+            try:
+                async with sesion_bd() as sesion:
+                    await sesion.execute(sa.text("SELECT 1"))
+                log.info("bd_disponible", intentos=intento)
+                return 0
+            except Exception as exc:  # noqa: BLE001 - se reintenta hasta el plazo
+                if time.monotonic() >= limite:
+                    log.error(
+                        "bd_no_disponible",
+                        intentos=intento,
+                        timeout_seg=args.timeout,
+                        error=str(exc),
+                    )
+                    return 1
+                log.info("esperando_bd", intento=intento, error=type(exc).__name__)
+                await asyncio.sleep(args.intervalo)
+
+    try:
+        return asyncio.run(ejecutar())
+    finally:
+        asyncio.run(cerrar_motor())
 
 
 def comando_sembrar(args: argparse.Namespace) -> int:
@@ -121,6 +160,11 @@ def construir_parser() -> argparse.ArgumentParser:
     sub.add_parser("migrar", help="Aplica las migraciones de Alembic").set_defaults(
         funcion=comando_migrar
     )
+
+    p_esperar = sub.add_parser("esperar-bd", help="Espera a que PostgreSQL acepte consultas")
+    p_esperar.add_argument("--timeout", type=float, default=90.0, help="Plazo maximo en segundos")
+    p_esperar.add_argument("--intervalo", type=float, default=2.0, help="Segundos entre intentos")
+    p_esperar.set_defaults(funcion=comando_esperar_bd)
 
     p_sembrar = sub.add_parser("sembrar", help="Carga la whitelist inicial de instrumentos")
     p_sembrar.add_argument("--archivo", type=Path, default=None, help="Ruta a un whitelist.json")

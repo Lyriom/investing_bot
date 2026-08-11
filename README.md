@@ -76,7 +76,9 @@ y en `.dockerignore`, y hay un test que lo verifica.
 
 ## Despliegue en servidor
 
-Guía completa en [`docs/despliegue.md`](docs/despliegue.md). En corto:
+- **Easypanel** (u otro panel donde cada servicio es un contenedor suelto):
+  [`docs/easypanel.md`](docs/easypanel.md).
+- **VPS con Docker Compose**: [`docs/despliegue.md`](docs/despliegue.md). En corto:
 
 ```bash
 git clone https://github.com/Lyriom/investing_bot.git /opt/investing_bot

@@ -35,6 +35,13 @@ RUN useradd --create-home --uid 1000 investing \
 
 WORKDIR /app
 
+# Entrypoint comun. Permite desplegar en plataformas sin `depends_on`
+# (Easypanel, Railway) controlando espera de base, migraciones y que proceso
+# levantar por variables de entorno. Ver docker/arrancar.sh.
+COPY docker/arrancar.sh /usr/local/bin/arrancar
+RUN chmod +x /usr/local/bin/arrancar
+ENTRYPOINT ["/usr/local/bin/arrancar"]
+
 # =============================================================================
 # constructor — resuelve e instala las dependencias en un venv aislado
 # =============================================================================
