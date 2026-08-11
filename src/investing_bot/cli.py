@@ -6,6 +6,7 @@ investing-bot ingesta       corre un ingestor a mano
 investing-bot api           levanta el dashboard
 investing-bot bot           levanta el bot de Telegram
 investing-bot planificador  levanta APScheduler
+investing-bot todo          levanta los tres en un solo proceso
 """
 
 from __future__ import annotations
@@ -186,6 +187,13 @@ def comando_planificador(_: argparse.Namespace) -> int:
     return 0
 
 
+def comando_todo(_: argparse.Namespace) -> int:
+    """Levanta dashboard, planificador y bot en un solo proceso."""
+    from investing_bot.todo_en_uno import ejecutar_todo
+
+    return asyncio.run(ejecutar_todo())
+
+
 def construir_parser() -> argparse.ArgumentParser:
     """Define la interfaz de linea de comandos."""
     parser = argparse.ArgumentParser(
@@ -225,6 +233,9 @@ def construir_parser() -> argparse.ArgumentParser:
     sub.add_parser("bot", help="Levanta el bot de Telegram").set_defaults(funcion=comando_bot)
     sub.add_parser("planificador", help="Levanta APScheduler").set_defaults(
         funcion=comando_planificador
+    )
+    sub.add_parser("todo", help="Levanta dashboard, planificador y bot juntos").set_defaults(
+        funcion=comando_todo
     )
     return parser
 

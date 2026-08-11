@@ -1,22 +1,47 @@
 # Despliegue en Easypanel
 
 Easypanel no usa `docker-compose.yml` para los servicios de tipo **App**: cada
-servicio es **un contenedor**, y no existe `depends_on`. Por eso el despliegue
-se arma con **cuatro servicios** y se controla por variables de entorno.
+servicio es **un contenedor**, y no existe `depends_on`. Hay dos formas de
+montarlo.
+
+## Dos servicios (recomendado para un operador)
 
 | Servicio | Tipo | Qué hace | ¿Dominio? |
 |---|---|---|---|
 | `investing-bbd` | Postgres | La base de datos | No |
-| `investing` | App | Dashboard. **Además aplica las migraciones al arrancar** | Sí, puerto 8000 |
-| `planificador` | App | APScheduler: ingesta + **el digest de las 18:15 ET** | No |
-| `bot` | App | Bot de Telegram: responde `/hoy`, `/desglose`, `/pausar` | No |
+| `investing` | App | **Todo**: dashboard, planificador y bot, en un proceso | Sí, puerto 8000 |
 
-Los tres servicios App usan **la misma imagen y el mismo repo**. Lo único que
-cambia entre ellos es `SERVICIO` y `EJECUTAR_MIGRACIONES`.
+Se activa con `SERVICIO=todo`. Es lo que documenta el resto de esta guía.
 
-> **Sin `planificador` no llega ninguna alerta.** El dashboard no ingiere datos
-> ni envía nada; el bot solo contesta cuando le preguntas. El digest diario sale
-> del planificador. Es el servicio que más gente olvida crear.
+## Cuatro servicios (separados)
+
+| Servicio | Tipo | Qué hace | ¿Dominio? |
+|---|---|---|---|
+| `investing-bbd` | Postgres | La base de datos | No |
+| `investing` | App | `SERVICIO=api` — dashboard | Sí, puerto 8000 |
+| `planificador` | App | `SERVICIO=planificador` — ingesta + digest de las 18:15 ET | No |
+| `bot` | App | `SERVICIO=bot` — responde `/hoy`, `/desglose`, `/pausar` | No |
+
+Los tres App usan la misma imagen y el mismo repo; lo único que cambia entre
+ellos es `SERVICIO`. Ver el [apéndice](#apéndice-el-despliegue-separado).
+
+## Cuál elegir
+
+**`todo` junta los tres en un proceso supervisado.** A cambio de configurar una
+sola vez las variables, se pierde el aislamiento: si uno cae, el proceso termina
+con código distinto de cero y Easypanel lo reinicia entero. Un token de Telegram
+mal escrito tumba también el dashboard, con este mensaje en los logs:
+
+```
+servicio_caido  servicio=bot  error=The token `...` was rejected by the server.
+```
+
+Para un sistema de una persona, un reinicio de treinta segundos sale más barato
+que mantener tres configuraciones en sincronía. Si necesitas que el dashboard
+siga en pie mientras depuras el bot, separa los servicios.
+
+Lo que **no** cambia entre las dos formas: el digest, la ingesta y el bot corren
+igual. `todo` no es un modo degradado.
 
 ---
 
@@ -58,14 +83,23 @@ días**, porque ninguna señal tiene datos.
 | **@BotFather** en Telegram → `/newbot` | `TELEGRAM_BOT_TOKEN` |
 | **@userinfobot** en Telegram → le escribes cualquier cosa | `TELEGRAM_CHAT_ID_AUTORIZADO` (tu número) |
 | [finnhub.io/register](https://finnhub.io/register) (gratis) | `FINNHUB_API_KEY` → señal S1, peso 0.40 |
-| [reddit.com/prefs/apps](https://www.reddit.com/prefs/apps) → **create app** tipo **script** | `REDDIT_CLIENT_ID` (bajo el nombre) y `REDDIT_CLIENT_SECRET` → señal S2, peso 0.25 |
+| [reddit.com/prefs/apps](https://www.reddit.com/prefs/apps) → **create app** | `REDDIT_CLIENT_ID` y `REDDIT_CLIENT_SECRET` → señal S2, peso 0.25 |
+
+**Es una sola app de Reddit, y el tipo tiene que ser `script`** — no `web app`.
+`script` es el único que autentica con usuario y contraseña de la propia cuenta,
+sin flujo OAuth ni `redirect uri`, que es justo lo que hace el ingestor. Deja
+`about url` y `redirect uri` vacíos.
+
+Una vez creada, Reddit muestra dos cadenas: el `client_id` es la de **debajo del
+nombre de la app**, arriba a la izquierda (no lleva etiqueta), y el `secret` sí
+va etiquetado como `secret`.
 
 La señal S3 (Congreso, peso 0.15) **no tiene fuente viva hoy**: los datasets de
 stock-watcher devuelven 403 desde agosto de 2026. No hay clave que conseguir.
 
 ---
 
-## 3. Configurar el servicio `investing` (dashboard)
+## 3. Configurar el servicio `investing`
 
 ### Source
 
@@ -83,8 +117,7 @@ lleva tests ni herramientas de desarrollo.
 
 ### Environment
 
-Este es el bloque completo. Es **el mismo para los tres servicios App** salvo
-las dos líneas marcadas, así que consérvalo a mano.
+Este es el bloque completo. Pégalo entero y sustituye lo que está en mayúsculas.
 
 ```env
 ENTORNO=produccion
@@ -94,8 +127,8 @@ URL_BD=postgres://postgres:LA_CLAVE_DEL_PANEL@thelonec_investing-bbd:5432/postgr
 
 ESPERAR_BD=true
 ESPERAR_BD_TIMEOUT=120
-EJECUTAR_MIGRACIONES=true    # <-- SOLO en este servicio
-SERVICIO=api                 # <-- cambia en los otros dos
+EJECUTAR_MIGRACIONES=true
+SERVICIO=todo
 
 TELEGRAM_BOT_TOKEN=TU_TOKEN_DE_BOTFATHER
 TELEGRAM_CHAT_ID_AUTORIZADO=TU_CHAT_ID
@@ -115,10 +148,13 @@ Ajusta `URL_BD` con el usuario, la contraseña, el host y el nombre de base que
 muestre tu servicio de Postgres — Easypanel suele crear la base y el usuario
 como `postgres`, pero confírmalo en su pantalla.
 
-`EJECUTAR_MIGRACIONES=true` va **solo aquí**. Este servicio espera a que la base
-responda, aplica Alembic, siembra los 30 instrumentos y recién entonces levanta
-el dashboard. Si lo pones también en los otros dos, tres contenedores intentan
-migrar a la vez contra la misma base.
+`SERVICIO=todo` es lo que arranca los tres a la vez. Con `EJECUTAR_MIGRACIONES=true`
+el contenedor espera a que la base responda, aplica Alembic, siembra los 30
+instrumentos y recién entonces levanta dashboard, planificador y bot.
+
+Si dejas Telegram vacío, el sistema arranca igual sin bot y lo dice en los logs
+(`bot_no_configurado`). Si pones un token **equivocado**, en cambio, el proceso
+entero se cae y se reinicia en bucle: es el precio de tenerlo todo junto.
 
 Sobre `CAPITAL_TOTAL_USD`: el mínimo viable es **200**. Con menos, el tamaño
 máximo por posición (25 %) cae por debajo del mínimo por operación (50 USD) y el
@@ -151,24 +187,17 @@ esperando_bd
 bd_disponible
 Running upgrade -> d847ecd0e7e3, esquema inicial
 whitelist_sembrada  nuevas=30 total=30
+todo_en_uno_iniciado  servicios=['bot', 'planificador', 'api']
+job_registrado  id=digest_diario  proxima_ejecucion=2026-08-11 18:15:00-04:00
+bot_iniciado  chat_autorizado=...
 Uvicorn running on http://0.0.0.0:8000
 ```
 
----
+**Las dos líneas que importan** son `todo_en_uno_iniciado` con los tres
+servicios, y `job_registrado id=digest_diario`. Si esa segunda no aparece, no va
+a salir ningún digest.
 
-## 4. Servicio `planificador`
-
-**+ Service → App**, nombre `planificador`. Mismo Source y mismo Build que
-`investing`. **Sin dominio** (no sirve HTTP).
-
-Environment: el mismo bloque del paso 3, con dos cambios:
-
-```env
-SERVICIO=planificador
-EJECUTAR_MIGRACIONES=false
-```
-
-Es el servicio que hace que el sistema esté vivo. Registra cinco jobs:
+Los cinco jobs que quedan programados:
 
 | Job | Cuándo |
 |---|---|
@@ -178,33 +207,7 @@ Es el servicio que hace que el sistema esté vivo. Registra cinco jobs:
 | Ingesta del Congreso | 06:30 ET |
 | **Digest diario** | **18:15 ET, lunes a viernes** (17:15 en Ecuador) |
 
-Al arrancar los imprime con su próxima ejecución:
-
-```
-job_registrado  id=digest_diario  proxima_ejecucion=2026-08-11 18:15:00-04:00
-```
-
-Si esa línea no aparece en los logs, el digest no va a salir.
-
----
-
-## 5. Servicio `bot`
-
-**+ Service → App**, nombre `bot`. Mismo Source y Build. Sin dominio.
-
-```env
-SERVICIO=bot
-EJECUTAR_MIGRACIONES=false
-```
-
-El bot **solo atiende el `chat_id` de la whitelist**. Cualquier otro chat recibe
-silencio, no un mensaje de error. Con `TELEGRAM_CHAT_ID_AUTORIZADO=0` se niega a
-arrancar, en vez de atender a cualquiera.
-
-Si dejas el token vacío, el servicio registra el motivo y termina con código 0.
-Eso es esperado: el resto del sistema sigue funcionando sin Telegram.
-
-Comandos disponibles:
+Y los comandos del bot:
 
 | Comando | Qué hace |
 |---|---|
@@ -214,9 +217,13 @@ Comandos disponibles:
 | `/registrar` | Anota una operación que ejecutaste a mano |
 | `/pausar` / `/reanudar` | Kill switch: deja de enviar (sigue calculando) |
 
+El bot **solo atiende el `chat_id` de la whitelist**. Cualquier otro chat recibe
+silencio, no un mensaje de error. Con `TELEGRAM_CHAT_ID_AUTORIZADO=0` se niega a
+arrancar, en vez de atender a cualquiera.
+
 ---
 
-## 6. Cargar el historial y probar
+## 4. Cargar el historial y probar
 
 El planificador solo corre a sus horas. Para no esperar, abre la **terminal**
 del servicio `investing` (el icono `>_` en la barra de acciones):
@@ -255,7 +262,7 @@ Las lee `docker/arrancar.sh`, el entrypoint de la imagen.
 | `ESPERAR_BD` | `false` | Espera a que PostgreSQL acepte consultas antes de arrancar |
 | `ESPERAR_BD_TIMEOUT` | `90` | Plazo máximo de esa espera, en segundos |
 | `EJECUTAR_MIGRACIONES` | `false` | Aplica Alembic y siembra la whitelist |
-| `SERVICIO` | *(vacío)* | `api`, `bot` o `planificador`. Manda sobre el CMD de la imagen |
+| `SERVICIO` | *(vacío)* | `todo`, `api`, `bot` o `planificador`. Manda sobre el CMD de la imagen |
 
 Existen porque en Easypanel no hay `depends_on`: sin `ESPERAR_BD`, el contenedor
 arranca antes que la base, revienta y entra en un ciclo de reinicios. Con Docker
@@ -278,23 +285,54 @@ Verifica que el host lleve el prefijo del proyecto
 proyecto reescribe `postgres://` a `postgresql+asyncpg://` solo. Si aparece,
 `URL_BD` trae un esquema raro; usa el formato `postgres://usuario:clave@host:5432/base`.
 
-**El servicio `bot` aparece detenido con código 0.** Falta el token o el
-`chat_id`. Es el comportamiento previsto, no un fallo.
+**`bot_no_configurado` en los logs.** Falta el token o el `chat_id`. Es el
+comportamiento previsto: el sistema arranca sin bot y sigue ingiriendo datos.
 
-**No llega ningún digest.** Por orden: ¿existe el servicio `planificador`?
-¿aparece `job_registrado id=digest_diario` en sus logs? ¿está pausado el envío
-(`/reanudar`)? ¿está vinculado el chat (`/start`)?
+**Reinicios en bucle con `servicio_caido servicio=bot`.** El token está mal
+escrito, o el bot fue borrado en @BotFather. En modo `todo` eso tumba también el
+dashboard. Vacía `TELEGRAM_BOT_TOKEN` para volver a levantar el resto mientras
+lo arreglas.
+
+**Reinicios con `servicio_termino_antes_de_tiempo`.** Uno de los tres se fue por
+su cuenta sin que nadie se lo pidiera. La línea siguiente, `servicio_caido`, dice
+cuál y por qué.
+
+**No llega ningún digest.** Por orden: ¿aparece `job_registrado id=digest_diario`
+en los logs? ¿está pausado el envío (`/reanudar`)? ¿está vinculado el chat
+(`/start`)?
 
 **El digest llega pero dice «Sin sugerencias hoy».** Es un resultado válido, no
 un error — el sistema no fuerza operaciones. Pero si dice *«Ninguna señal tuvo
 datos suficientes»*, faltan las claves de Finnhub y Reddit del paso 2.
 
 **El dashboard muestra 0 barras de precio.** Aún no corrió la ingesta. Ejecuta
-el comando del paso 6.
+el comando del paso 4.
 
 **Las migraciones corren en cada reinicio.** Es correcto y es barato: Alembic no
 hace nada si ya está en `head`, y sembrar la whitelist es idempotente
 (`nuevas=0`).
+
+---
+
+## Apéndice: el despliegue separado
+
+Si prefieres los cuatro servicios, la única diferencia es que `investing` lleva
+`SERVICIO=api` y se añaden dos App más, con el **mismo Source, Build y bloque de
+variables**, sin dominio:
+
+| Servicio | Cambios sobre el bloque del paso 3 |
+|---|---|
+| `investing` | `SERVICIO=api` |
+| `planificador` | `SERVICIO=planificador` y `EJECUTAR_MIGRACIONES=false` |
+| `bot` | `SERVICIO=bot` y `EJECUTAR_MIGRACIONES=false` |
+
+`EJECUTAR_MIGRACIONES=true` va **en uno solo**. Si lo pones en los tres, tres
+contenedores intentan migrar a la vez contra la misma base.
+
+Y el aviso de siempre: **sin el servicio `planificador` no llega ninguna
+alerta.** El dashboard no ingiere datos ni envía nada; el bot solo contesta
+cuando le preguntas. El digest sale del planificador, y es el servicio que más
+se olvida crear. Es exactamente el problema que `SERVICIO=todo` elimina.
 
 ---
 

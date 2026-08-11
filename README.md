@@ -116,7 +116,13 @@ investing-bot digest --enviar             # lo manda por Telegram
 investing-bot api                         # dashboard
 investing-bot bot                         # bot de Telegram (polling)
 investing-bot planificador                # APScheduler
+investing-bot todo                        # los tres en un solo proceso
 ```
+
+`todo` supervisa los tres servicios en un proceso: útil en paneles donde cada
+servicio es un contenedor que hay que configurar a mano. Si uno cae, el proceso
+termina con código distinto de cero para que el orquestador lo reinicie entero
+—se cambia aislamiento por una sola configuración que mantener.
 
 ### Para que el sistema produzca algo
 

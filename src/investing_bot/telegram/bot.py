@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 from telegram.ext import (
     Application,
     ApplicationBuilder,
@@ -92,15 +94,54 @@ def construir_aplicacion(config: Configuracion | None = None) -> Application:
     return aplicacion
 
 
+def avisar_si_no_configurado(config: Configuracion) -> bool:
+    """Registra por que el bot no puede arrancar. Devuelve True si puede."""
+    if config.telegram_configurado:
+        return True
+    log.warning(
+        "bot_no_configurado",
+        motivo="Falta TELEGRAM_BOT_TOKEN o TELEGRAM_CHAT_ID_AUTORIZADO en el entorno.",
+        accion="El servicio termina sin error; el resto del sistema sigue funcionando.",
+    )
+    return False
+
+
+async def correr_bot(detener: asyncio.Event, config: Configuracion | None = None) -> None:
+    """Arranca el polling y lo sostiene hasta que se pida el apagado.
+
+    `Application.run_polling()` monta y desmonta su propio bucle de eventos, asi
+    que no sirve cuando el bot comparte proceso con la API y el planificador
+    (modo `todo`). Aqui se maneja el ciclo de vida a mano sobre el bucle que ya
+    existe.
+    """
+    config = config or obtener_config()
+    aplicacion = construir_aplicacion(config)
+    actualizador = aplicacion.updater
+    if actualizador is None:  # pragma: no cover - ApplicationBuilder siempre lo crea
+        raise RuntimeError("La aplicacion de Telegram se construyo sin updater.")
+
+    await aplicacion.initialize()
+    await aplicacion.start()
+    await actualizador.start_polling(drop_pending_updates=True)
+    log.info("bot_iniciado", chat_autorizado=config.telegram_chat_id_autorizado)
+
+    try:
+        await detener.wait()
+    finally:
+        # El orden importa: primero se deja de leer updates, luego se para el
+        # despachador y al final se sueltan las conexiones HTTP.
+        if actualizador.running:
+            await actualizador.stop()
+        if aplicacion.running:
+            await aplicacion.stop()
+        await aplicacion.shutdown()
+        log.info("bot_detenido")
+
+
 def ejecutar_bot() -> None:
-    """Arranca el bot en modo polling. Bloquea el proceso."""
+    """Arranca el bot como servicio suelto. Bloquea el proceso."""
     config = obtener_config()
-    if not config.telegram_configurado:
-        log.warning(
-            "bot_no_configurado",
-            motivo="Falta TELEGRAM_BOT_TOKEN o TELEGRAM_CHAT_ID_AUTORIZADO en el entorno.",
-            accion="El servicio termina sin error; el resto del sistema sigue funcionando.",
-        )
+    if not avisar_si_no_configurado(config):
         return
 
     aplicacion = construir_aplicacion(config)

@@ -7,7 +7,6 @@ porque lo que marca el ritmo es el mercado, no el operador.
 from __future__ import annotations
 
 import asyncio
-import signal
 from collections.abc import Awaitable, Callable
 from zoneinfo import ZoneInfo
 
@@ -15,6 +14,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
+from investing_bot.apagado import instalar_senales
 from investing_bot.config import obtener_config
 from investing_bot.db import cerrar_motor
 from investing_bot.ingestores import INGESTORES
@@ -115,26 +115,13 @@ def construir_planificador() -> AsyncIOScheduler:
     return planificador
 
 
-def _instalar_senales(detener: asyncio.Event) -> None:
-    """Hace que SIGTERM y SIGINT despierten al proceso en vez de matarlo.
+async def correr_planificador(detener: asyncio.Event) -> None:
+    """Mantiene vivo el planificador hasta que se pida el apagado.
 
-    `docker stop` manda SIGTERM y espera 10 s antes de recurrir a SIGKILL. Sin
-    este manejador el proceso agota esa espera en cada despliegue y muere de
-    golpe, dejando el pool de conexiones a medio cerrar.
+    No toca senales ni cierra el motor: de eso se encarga quien lo invoca. Asi
+    la misma corrutina sirve para el servicio suelto y para el modo `todo`,
+    donde comparte proceso con la API y el bot.
     """
-    bucle = asyncio.get_running_loop()
-    for senal in (signal.SIGTERM, signal.SIGINT):
-        try:
-            bucle.add_signal_handler(senal, detener.set)
-        except NotImplementedError:  # pragma: no cover - Windows
-            log.warning("senal_no_soportada", senal=senal.name)
-
-
-async def ejecutar_planificador() -> None:
-    """Arranca el planificador y lo mantiene vivo hasta recibir una senal."""
-    detener = asyncio.Event()
-    _instalar_senales(detener)
-
     planificador = construir_planificador()
     planificador.start()
     for job in planificador.get_jobs():
@@ -150,5 +137,14 @@ async def ejecutar_planificador() -> None:
         # terminar antes de cerrar la base. Perder una corrida por un
         # despliegue seria dejar un hueco silencioso en los datos.
         planificador.shutdown(wait=True)
-        await cerrar_motor()
         log.info("planificador_detenido")
+
+
+async def ejecutar_planificador() -> None:
+    """Arranca el planificador como servicio suelto, hasta recibir una senal."""
+    detener = asyncio.Event()
+    instalar_senales(detener)
+    try:
+        await correr_planificador(detener)
+    finally:
+        await cerrar_motor()

@@ -386,3 +386,45 @@ arbitrarios (I4), nadie ha medido si superan a comprar SPY y quedarse quieto, y 
 comprobado qué pasa con `retraso_entrada_dias = 1`. Hasta que el backtester exista y diga
 algo, el digest es un ejercicio de ingeniería, no una recomendación de inversión — y el
 propio mensaje lo dice en cada envío.
+
+---
+
+## 2026-08-11 — Un modo que corre los tres servicios juntos
+
+El despliegue separado exige crear tres servicios en el panel, cada uno con su bloque de
+~20 variables que hay que mantener en sincronía. En la práctica el operador desplegó uno solo
+—el dashboard— y se quedó esperando alertas que nunca iban a llegar, porque el digest sale
+del planificador. El diseño era correcto y aun así el sistema no funcionaba: **el modo de
+fallo estaba en la configuración, no en el código.**
+
+`SERVICIO=todo` los supervisa en un proceso. No es un modo degradado: los cinco jobs y los
+seis comandos corren igual.
+
+**El intercambio, explícito:** si uno cae, el proceso termina con código distinto de cero y
+el orquestador reinicia los tres. Un token de Telegram mal escrito tumba también el
+dashboard. Verificado en contenedor: token inválido → `servicio_caido servicio=bot` → salida
+1. Para un operador, un reinicio de treinta segundos cuesta menos que tres configuraciones
+divergentes. Con más gente, o si el dashboard tiene que sobrevivir mientras se depura el bot,
+el despliegue separado sigue documentado y soportado.
+
+**Uvicorn tuvo que ceder las señales.** `Server.serve()` instala sus manejadores con
+`signal.signal`, los restaura al salir y **vuelve a lanzar la señal capturada**. En un
+proceso donde uvicorn es uno de tres, esa relanzada mata al bot y al planificador a mitad del
+cierre, con el pool de conexiones abierto y una posible ingesta a medias. `ServidorSinSenales`
+anula `capture_signals`: las señales las maneja el supervisor, y solo él.
+
+**El apagado va en orden inverso al arranque.** El ciclo de vida de FastAPI cierra el pool de
+conexiones; si la API se apagara primero, el planificador podría estar terminando una ingesta
+contra un motor ya cerrado. La API se cierra la última, y hay un test que lo fija.
+
+**Un test destapó un fallo real del supervisor.** Al llegar SIGTERM los tres servicios
+despiertan en la misma iteración del bucle, así que cuando el supervisor miraba cuáles habían
+terminado, los encontraba a todos hechos y reportaba `servicio_termino_antes_de_tiempo` con
+código 1 — convertía cada `docker stop` normal en un fallo. El discriminador correcto no es
+"¿terminó la tarea?" sino "¿se pidió el apagado?": si `detener` ya está puesto, están
+terminando porque se les dijo.
+
+Verificado en contenedor contra PostgreSQL real: arranque completo (migraciones, siembra,
+cinco jobs, dashboard sirviendo), `docker stop` en **1 s** con código 0 y cierre ordenado
+—planificador primero, API al final. Sin este manejo, `docker stop` agota los 10 s de gracia
+y termina en SIGKILL.
