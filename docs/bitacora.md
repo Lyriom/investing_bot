@@ -122,3 +122,81 @@ dependen de que existan señales y sugerencias: son FASE 3.
 
 FASE 1 — ingestores de noticias, Reddit y Congreso; normalizador de entidades; deduplicador;
 FinBERT. El criterio duro es reportar **el porcentaje medido** de reducción por deduplicación.
+
+---
+
+## 2026-08-11 — Empaquetado para servidor
+
+### Qué se construyó
+
+Preparación del despliegue. No toca la lógica del sistema: solo cómo se empaqueta y se corre.
+
+- `Dockerfile` multi-stage con destinos `desarrollo` y `produccion`. El toolchain de
+  compilación vive en un stage intermedio y no llega a la imagen final.
+- `.dockerignore`, que no existía.
+- `docker-compose.produccion.yml`, separado del de desarrollo.
+- Apagado ordenado del planificador ante SIGTERM.
+- `docs/despliegue.md` con el procedimiento completo.
+
+### Qué se midió
+
+| Medición | Antes | Después |
+|---|---|---|
+| Contexto de build enviado al daemon | 363 MB | **7,6 kB** |
+| Tamaño de la imagen de servidor | 810 MB | **657 MB** |
+| Tiempo de `docker stop planificador` | 10 s (SIGKILL) | **0 s** |
+| Tests | 77 pasan | 77 pasan (75 + 2 saltados dentro del contenedor) |
+
+Verificado sobre la pila de producción real: migraciones aplicadas, whitelist sembrada,
+2700 barras ingeridas desde la imagen `produccion`, dashboard respondiendo por loopback.
+
+### Qué se decidió
+
+**1. Faltaba `.dockerignore`, y era un problema de seguridad además de lentitud.**
+
+Sin él, el `.venv` local (319 MB) viajaba al daemon en cada build. Peor: nada impedía que
+un `.env` con secretos acabara dentro de una imagen que después se sube a un registro.
+El invariante I5 protege el repositorio, pero una imagen publicada filtra igual de bien.
+
+**2. `produccion` es el último stage, y por tanto el destino por defecto.**
+
+`docker build .` sin `--target` devuelve la imagen de servidor. Que el descuido lleve a la
+imagen más segura y no a la que trae pytest y el código fuente suelto.
+
+**3. El dashboard se ata a `127.0.0.1` en producción.**
+
+No tiene autenticación y, a partir de la FASE 3, mostrará señales y portafolio. La
+alternativa —publicarlo y "ya le pondré auth después"— es exactamente cómo se filtran estos
+paneles. El acceso pasa por proxy inverso con TLS y contraseña, o por túnel SSH. La base de
+datos directamente no publica puerto.
+
+**4. `${VARIABLE:?mensaje}` en vez de valores por defecto.**
+
+El compose de desarrollo tiene defaults cómodos (`investing_local` de contraseña). El de
+producción falla al arrancar si falta un secreto. Un default cómodo que sobrevive hasta el
+servidor es una contraseña de base conocida por cualquiera que lea el repo.
+
+**5. El planificador atiende SIGTERM, y apaga con `wait=True`.**
+
+Antes ignoraba la señal: Docker esperaba 10 s y recurría a SIGKILL en cada despliegue,
+matando el proceso con el pool de conexiones a medio cerrar. Ahora termina en 0 s. El
+`wait=True` es deliberado: si hay una ingesta a mitad de camino se la deja terminar, porque
+perder una corrida por un despliegue deja un hueco silencioso en los datos —y en un sistema
+point-in-time un hueco no se puede rellenar después.
+
+**6. Dos tests pasaron a saltarse dentro del contenedor.**
+
+`test_env_esta_ignorado_por_git` y `test_env_example_no_trae_valores_reales` verifican
+higiene del *repositorio*, no comportamiento de la *aplicación*, y los archivos que leen no
+están —a propósito— en la imagen. Se saltan con motivo explícito en lugar de meter
+`.gitignore` en una imagen de Docker para que un test verde. Siguen corriendo en local y en
+cualquier CI que parta de un checkout.
+
+### Pendiente
+
+- No hay CI. Hoy los tests corren porque alguien se acuerda. Un workflow de GitHub Actions
+  que ejecute `ruff`, `mypy` y `pytest` en cada push es lo siguiente en esta línea.
+- No hay registro de imágenes: el servidor construye con `--build`. Suficiente para una
+  máquina; si algún día hay dos, hay que publicar la imagen en GHCR.
+- El respaldo de la base está documentado como cron en `docs/despliegue.md`, pero no
+  verificado. Un respaldo que nunca se restauró no es un respaldo.

@@ -2,7 +2,18 @@
 
 from __future__ import annotations
 
+import pytest
+
 from investing_bot.config import RAIZ_PROYECTO, Configuracion
+
+# Los dos ultimos tests verifican higiene del *repositorio*, no comportamiento
+# de la aplicacion, asi que no aplican cuando la suite corre dentro de la
+# imagen de contenedor (que a proposito no incluye `.gitignore` ni
+# `.env.example`). Se saltan con motivo explicito en vez de fallar.
+requiere_checkout = pytest.mark.skipif(
+    not (RAIZ_PROYECTO / ".gitignore").is_file(),
+    reason="Higiene del repositorio: requiere el checkout de git, no la imagen.",
+)
 
 
 def test_url_bd_se_construye_desde_las_partes() -> None:
@@ -35,6 +46,7 @@ def test_el_archivo_de_whitelist_existe() -> None:
     assert Configuracion(_env_file=None).archivo_whitelist.is_file()
 
 
+@requiere_checkout
 def test_env_esta_ignorado_por_git() -> None:
     """Invariante I5: los secretos nunca entran al repositorio."""
     gitignore = (RAIZ_PROYECTO / ".gitignore").read_text(encoding="utf-8")
@@ -42,6 +54,7 @@ def test_env_esta_ignorado_por_git() -> None:
     assert "!.env.example" in gitignore
 
 
+@requiere_checkout
 def test_env_example_no_trae_valores_reales() -> None:
     """`.env.example` documenta las claves; jamas sus valores."""
     ejemplo = RAIZ_PROYECTO / ".env.example"

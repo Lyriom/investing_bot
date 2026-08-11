@@ -8,6 +8,7 @@ en las fases 1 y 3.
 from __future__ import annotations
 
 import asyncio
+import signal
 from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -56,18 +57,40 @@ def construir_planificador() -> AsyncIOScheduler:
     return planificador
 
 
+def _instalar_senales(detener: asyncio.Event) -> None:
+    """Hace que SIGTERM y SIGINT despierten al proceso en vez de matarlo.
+
+    `docker stop` manda SIGTERM y espera 10 s antes de recurrir a SIGKILL. Sin
+    este manejador el proceso agota esa espera en cada despliegue y muere de
+    golpe, dejando el pool de conexiones a medio cerrar.
+    """
+    bucle = asyncio.get_running_loop()
+    for senal in (signal.SIGTERM, signal.SIGINT):
+        try:
+            bucle.add_signal_handler(senal, detener.set)
+        except NotImplementedError:  # pragma: no cover - Windows
+            log.warning("senal_no_soportada", senal=senal.name)
+
+
 async def ejecutar_planificador() -> None:
-    """Arranca el planificador y lo mantiene vivo hasta que lo interrumpan."""
+    """Arranca el planificador y lo mantiene vivo hasta recibir una senal."""
+    detener = asyncio.Event()
+    _instalar_senales(detener)
+
     planificador = construir_planificador()
     planificador.start()
     for job in planificador.get_jobs():
         log.info("job_registrado", id=job.id, proxima_ejecucion=str(job.next_run_time))
 
     try:
-        while True:
-            await asyncio.sleep(3600)
-    except (KeyboardInterrupt, asyncio.CancelledError):
-        log.info("planificador_detenido")
+        await detener.wait()
+        log.info("senal_de_apagado_recibida")
+    except asyncio.CancelledError:
+        log.info("planificador_cancelado")
     finally:
-        planificador.shutdown(wait=False)
+        # `wait=True`: si hay una ingesta a mitad de camino, se la deja
+        # terminar antes de cerrar la base. Perder una corrida por un
+        # despliegue seria dejar un hueco silencioso en los datos.
+        planificador.shutdown(wait=True)
         await cerrar_motor()
+        log.info("planificador_detenido")

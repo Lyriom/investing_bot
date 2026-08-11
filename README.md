@@ -26,6 +26,7 @@ El SPEC manda trabajar **una fase a la vez**. Lo implementado hoy:
 | ✅ | Ingestor de precios (yfinance), idempotente y tolerante a fallo | listo |
 | ✅ | Bot de Telegram con `/start` y `/estado`, solo para el chat autorizado | listo |
 | ✅ | Dashboard con estado del pipeline y cobertura de datos | listo |
+| ✅ | Imagen multi-stage y compose de producción para el servidor | listo |
 | ⬜ | Ingestores de noticias, Reddit y Congreso; normalizador; FinBERT | FASE 1 |
 | ⬜ | Backtester point-in-time | FASE 2 |
 | ⬜ | Señales, gestor de riesgo, digest diario | FASE 3 |
@@ -35,7 +36,7 @@ tocar pesos antes de que el backtester de la FASE 2 esté validado.
 
 ---
 
-## Arranque
+## Arranque local
 
 Requisitos: Docker y Docker Compose. Nada más.
 
@@ -68,8 +69,35 @@ Todas están documentadas en [`.env.example`](.env.example). Las mínimas para a
 | `TELEGRAM_BOT_TOKEN` | Token de @BotFather. Sin él, el servicio `bot` no arranca (y el resto sigue funcionando) |
 | `TELEGRAM_CHAT_ID_AUTORIZADO` | Único chat que el bot atiende. Con `0` el bot se niega a arrancar |
 
-**Los secretos nunca entran al repositorio** (invariante I5). `.env` está en `.gitignore`,
-y hay un test que lo verifica.
+**Los secretos nunca entran al repositorio** (invariante I5). `.env` está en `.gitignore`
+y en `.dockerignore`, y hay un test que lo verifica.
+
+---
+
+## Despliegue en servidor
+
+Guía completa en [`docs/despliegue.md`](docs/despliegue.md). En corto:
+
+```bash
+git clone https://github.com/Lyriom/investing_bot.git /opt/investing_bot
+cd /opt/investing_bot && cp .env.example .env && chmod 600 .env   # y rellenarlo
+docker compose -f docker-compose.produccion.yml up -d --build
+```
+
+El `Dockerfile` es multi-stage con dos destinos:
+
+| Destino | Contiene | Lo usa |
+|---|---|---|
+| `desarrollo` | pytest, ruff, mypy, tests, instalación editable | `docker-compose.yml` |
+| `produccion` | solo el venv de runtime + Alembic. 657 MB frente a 810 MB | `docker-compose.produccion.yml` |
+
+`produccion` es el último stage y por tanto el destino por defecto de `docker build .`:
+quien construya sin `--target` obtiene la imagen de servidor, no la de desarrollo.
+
+> **El dashboard no tiene autenticación.** El compose de producción lo ata a `127.0.0.1`
+> a propósito, y `db` no publica ningún puerto. El acceso pasa por un proxy inverso con
+> TLS y contraseña, o por un túnel SSH. Publicar el 8000 en internet sería publicar tu
+> portafolio.
 
 ---
 
@@ -89,7 +117,7 @@ investing-bot planificador               # APScheduler
 ```bash
 python3.11 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
-pytest -q          # 60 tests, sobre sqlite en memoria: sin contenedor y sin red
+pytest -q          # 77 tests, sobre sqlite en memoria: sin contenedor y sin red
 ruff check . && ruff format --check .
 mypy
 ```

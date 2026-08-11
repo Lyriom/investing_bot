@@ -1,0 +1,55 @@
+# Todo lo que no debe entrar al contexto de build.
+#
+# Sin este archivo, el `.venv` local (319 MB) viaja al daemon en cada build y,
+# peor, un `.env` con secretos podria acabar dentro de una imagen que despues
+# se sube a un registro (invariante I5).
+
+# --- Secretos --------------------------------------------------------------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credenciales*.json
+
+# --- Entornos virtuales y artefactos de Python -----------------------------
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# --- Herramientas ----------------------------------------------------------
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# --- Control de versiones y CI --------------------------------------------
+.git/
+.gitignore
+.github/
+
+# --- Datos locales ---------------------------------------------------------
+datos/
+*.db
+*.sqlite3
+*.log
+modelos_descargados/
+
+# --- Sistema operativo y editores -----------------------------------------
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# --- Docker (no se copia a si mismo) --------------------------------------
+Dockerfile
+.dockerignore
+docker-compose*.yml

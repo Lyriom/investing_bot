@@ -1,0 +1,125 @@
+# Despliegue en SERVIDOR.
+#
+#   docker compose -f docker-compose.produccion.yml up -d --build
+#
+# Diferencias deliberadas respecto al compose de desarrollo:
+#
+#   - Construye el destino `produccion`: sin tests ni herramientas de dev.
+#   - PostgreSQL NO publica ningun puerto: solo es alcanzable desde la red
+#     interna de compose.
+#   - El dashboard escucha en 127.0.0.1, nunca en 0.0.0.0. **No tiene
+#     autenticacion**; exponerlo a internet directamente seria publicar el
+#     portafolio. Va detras de un proxy inverso con TLS y auth (ver
+#     docs/despliegue.md).
+#   - Los secretos vienen de `.env` en el servidor, que no se versiona.
+#     Si falta alguno obligatorio, compose falla al arrancar en vez de usar
+#     un valor por defecto inseguro.
+#   - Rotacion de logs y limites de memoria, para que un fallo no llene el
+#     disco ni tumbe la maquina.
+
+name: investing-bot
+
+x-imagen-produccion: &imagen-produccion
+  build:
+    context: .
+    target: produccion
+  image: investing-bot:${VERSION_IMAGEN:-0.1.0}
+  init: true
+  env_file: [.env]
+  environment:
+    POSTGRES_HOST: db
+    POSTGRES_PORT: 5432
+  logging: &logs
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "5"
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: always
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?falta POSTGRES_DB en .env}
+      POSTGRES_USER: ${POSTGRES_USER:?falta POSTGRES_USER en .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?falta POSTGRES_PASSWORD en .env}
+    volumes:
+      - datos_postgres:/var/lib/postgresql/data
+    # Sin `ports`: la base no se publica al host. Para inspeccionarla,
+    # `docker compose -f docker-compose.produccion.yml exec db psql -U ...`.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    logging: *logs
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  migraciones:
+    <<: *imagen-produccion
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+    command: >
+      sh -c "investing-bot migrar && investing-bot sembrar"
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  app:
+    <<: *imagen-produccion
+    restart: always
+    depends_on:
+      migraciones:
+        condition: service_completed_successfully
+    ports:
+      # Solo loopback. El proxy inverso del host es quien habla con internet.
+      - "127.0.0.1:${WEB_PUERTO_HOST:-8000}:8000"
+    command: ["investing-bot", "api"]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/salud"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          memory: 768M
+
+  planificador:
+    <<: *imagen-produccion
+    restart: always
+    depends_on:
+      migraciones:
+        condition: service_completed_successfully
+    command: ["investing-bot", "planificador"]
+    # La ingesta carga pandas y el frame completo de yfinance: es el proceso
+    # que mas memoria pide de los tres.
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+
+  bot:
+    <<: *imagen-produccion
+    # Sin token configurado el proceso sale con 0; `on-failure` evita el bucle
+    # de reinicios. Con token, se reinicia ante cualquier caida real.
+    restart: on-failure
+    depends_on:
+      migraciones:
+        condition: service_completed_successfully
+    command: ["investing-bot", "bot"]
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+volumes:
+  datos_postgres:

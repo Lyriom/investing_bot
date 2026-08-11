@@ -1,4 +1,15 @@
+# Entorno de DESARROLLO local.
+#
+# Construye el destino `desarrollo` de la imagen: incluye tests, ruff, mypy e
+# instalacion editable. Para el servidor, usar docker-compose.produccion.yml.
+
 name: investing-bot
+
+x-imagen-desarrollo: &imagen-desarrollo
+  build:
+    context: .
+    target: desarrollo
+  init: true
 
 x-entorno-comun: &entorno-comun
   ENTORNO: ${ENTORNO:-desarrollo}
@@ -26,7 +37,7 @@ services:
     volumes:
       - datos_postgres:/var/lib/postgresql/data
     ports:
-      # Expuesto para poder inspeccionar con psql desde el host.
+      # Expuesto solo en desarrollo, para poder inspeccionar con psql.
       - "${POSTGRES_PUERTO_HOST:-5433}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-investing} -d ${POSTGRES_DB:-investing_bot}"]
@@ -37,7 +48,7 @@ services:
   # Aplica las migraciones y siembra la whitelist. Corre una vez y termina.
   # Todo lo demas espera a que este servicio complete con exito.
   migraciones:
-    build: .
+    <<: *imagen-desarrollo
     restart: "no"
     environment: *entorno-comun
     depends_on:
@@ -47,7 +58,7 @@ services:
       sh -c "investing-bot migrar && investing-bot sembrar"
 
   app:
-    build: .
+    <<: *imagen-desarrollo
     restart: unless-stopped
     environment: *entorno-comun
     depends_on:
@@ -64,7 +75,7 @@ services:
       start_period: 20s
 
   planificador:
-    build: .
+    <<: *imagen-desarrollo
     restart: unless-stopped
     environment: *entorno-comun
     depends_on:
@@ -73,9 +84,9 @@ services:
     command: ["investing-bot", "planificador"]
 
   bot:
-    build: .
     # Si no hay token configurado, el proceso registra el motivo y sale con 0.
     # Con `on-failure` eso no genera un bucle de reinicios.
+    <<: *imagen-desarrollo
     restart: on-failure
     environment: *entorno-comun
     depends_on:
