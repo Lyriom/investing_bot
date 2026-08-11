@@ -98,6 +98,10 @@ class Configuracion(BaseSettings):
     )
     url_congreso_senado: str = "https://senate-stock-watcher-data.s3-us-west-2.amazonaws.com/aggregate/all_transactions.json"
     limite_posts_reddit: int = 300
+    # El plan gratuito de Marketaux da 100 peticiones al dia. El tope se deja
+    # por debajo para que una caida larga de Finnhub no agote la cuota en la
+    # primera corrida y deje al sistema sin noticias el resto del dia.
+    max_peticiones_marketaux_dia: int = 90
     reintentos_max: int = 4
     backoff_base_seg: float = 1.5
     # Fuerza el lexico aunque FinBERT este instalado. Util para tests y para

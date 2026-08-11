@@ -428,3 +428,52 @@ Verificado en contenedor contra PostgreSQL real: arranque completo (migraciones,
 cinco jobs, dashboard sirviendo), `docker stop` en **1 s** con código 0 y cierre ordenado
 —planificador primero, API al final. Sin este manejo, `docker stop` agota los 10 s de gracia
 y termina en SIGKILL.
+
+---
+
+## 2026-08-11 — Dos fuentes menos, y Marketaux como respaldo
+
+**Reddit cerró la puerta.** Desde la Responsible Builder Policy de junio de 2026, crear la
+app ya no da acceso a la API: hay una solicitud manual aparte, con colas de dos a cuatro
+semanas, y los proyectos personales son la categoría con más rechazos. S2 (peso 0.25) queda
+en el aire. Sumada al 403 de los datasets del Congreso, el sistema se queda con **una sola
+fuente**: Finnhub.
+
+No se va a leer el JSON público de Reddit sin credenciales para esquivar la aprobación. Sería
+exactamente lo que el SPEC prohíbe para Hapi: automatizar un servicio violando sus términos.
+
+**Se conectó `MARKETAUX_API_KEY`**, que llevaba desde la FASE 0 declarada en la configuración
+sin que la usara nadie. Ahora es el respaldo del ingestor de noticias.
+
+**Es respaldo, no una segunda evidencia.** Finnhub y Marketaux son dos agregadores de
+titulares: cubren en buena medida las mismas fuentes y están correlacionados. Contarlos como
+independientes sería el anti-objetivo explícito del SPEC. Alimentan la misma señal S1, con el
+mismo peso 0.40, y solo se consulta al segundo cuando el primero no trajo nada o falló. Lo
+que aporta es cobertura y tolerancia a fallo, no confianza.
+
+**Su `sentiment_score` se descarta a propósito.** Marketaux puntúa el sentimiento por entidad,
+pero el sistema clasifica con su propio modelo y anota cuál usó en `modelo_usado`. Mezclar dos
+escalas distintas bajo la misma columna haría incomparables las filas y rompería la
+auditabilidad del invariante I3.
+
+**El plan gratuito obliga a racionar**: 100 peticiones al día, 3 artículos por petición. Con
+30 tickers y una corrida cada 4 h, llamar siempre a los dos proveedores agotaría la cuota
+antes del mediodía. De ahí el diseño en cascada y el `PresupuestoDiario`, que vive a nivel de
+proceso —no de instancia— porque el planificador construye un ingestor nuevo en cada corrida
+y un contador por instancia se reiniciaría cada cuatro horas sin limitar nada.
+
+**El ingestor de noticias estaba al 21 % de cobertura**, sin tests propios: era el único de
+los cuatro sin ellos. Ahora está al 90 %, con 23 tests que cubren la cascada, el presupuesto,
+la traducción del formato de Marketaux y el 402 por cuota agotada.
+
+### Lo que esto deja sin resolver
+
+Con una sola fuente viva, el gestor de riesgo sigue exigiendo solo que **alguna** señal tenga
+datos (`sin_evidencia`). En la práctica, cada sugerencia vendría de un titular con
+confirmación de precio. Eso no es el cruce de fuentes independientes que supone el diseño;
+es una fuente con pasos extra.
+
+Endurecerlo —exigir dos señales independientes— sería una regla de riesgo, no un ajuste de
+pesos, así que no chocaría con I4. Pero hoy significaría **cero sugerencias** hasta que vuelva
+una segunda fuente. Queda pendiente de decisión del operador, anotado aquí para que sea una
+elección y no un descuido.

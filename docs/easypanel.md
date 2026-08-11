@@ -78,24 +78,66 @@ Cuatro cosas, antes de tocar el resto. Sin las dos primeras el bot no existe;
 sin las dos últimas el sistema arranca pero **el digest sale vacío todos los
 días**, porque ninguna señal tiene datos.
 
-| Dónde | Qué sacas |
-|---|---|
-| **@BotFather** en Telegram → `/newbot` | `TELEGRAM_BOT_TOKEN` |
-| **@userinfobot** en Telegram → le escribes cualquier cosa | `TELEGRAM_CHAT_ID_AUTORIZADO` (tu número) |
-| [finnhub.io/register](https://finnhub.io/register) (gratis) | `FINNHUB_API_KEY` → señal S1, peso 0.40 |
-| [reddit.com/prefs/apps](https://www.reddit.com/prefs/apps) → **create app** | `REDDIT_CLIENT_ID` y `REDDIT_CLIENT_SECRET` → señal S2, peso 0.25 |
+| Dónde | Qué sacas | Para qué |
+|---|---|---|
+| **@BotFather** en Telegram → `/newbot` | `TELEGRAM_BOT_TOKEN` | El bot |
+| **@userinfobot** en Telegram → le escribes cualquier cosa | `TELEGRAM_CHAT_ID_AUTORIZADO` | Tu número de chat |
+| [finnhub.io/register](https://finnhub.io/register) | `FINNHUB_API_KEY` | **S1**, peso 0.40 |
+| [marketaux.com/register](https://www.marketaux.com/register) | `MARKETAUX_API_KEY` | Respaldo de S1 |
+| [reddit.com/prefs/apps](https://www.reddit.com/prefs/apps) | `REDDIT_CLIENT_ID` y `REDDIT_CLIENT_SECRET` | **S2**, peso 0.25 |
 
-**Es una sola app de Reddit, y el tipo tiene que ser `script`** — no `web app`.
-`script` es el único que autentica con usuario y contraseña de la propia cuenta,
-sin flujo OAuth ni `redirect uri`, que es justo lo que hace el ingestor. Deja
-`about url` y `redirect uri` vacíos.
+Las cinco son gratis. Finnhub es la única imprescindible.
 
-Una vez creada, Reddit muestra dos cadenas: el `client_id` es la de **debajo del
-nombre de la app**, arriba a la izquierda (no lleva etiqueta), y el `secret` sí
-va etiquetado como `secret`.
+### Marketaux: respaldo, no segunda opinión
 
-La señal S3 (Congreso, peso 0.15) **no tiene fuente viva hoy**: los datasets de
-stock-watcher devuelven 403 desde agosto de 2026. No hay clave que conseguir.
+Se consulta **solo** para los tickers donde Finnhub no trajo nada o falló.
+Alimenta la misma señal S1: dos agregadores de titulares cubren en buena medida
+las mismas fuentes y **no son independientes entre sí**, así que no suma peso —
+suma cobertura y resistencia a que Finnhub se caiga.
+
+El plan gratuito da **100 peticiones al día y 3 artículos por petición**. El
+sistema se limita solo a 90 (`MAX_PETICIONES_MARKETAUX_DIA`) para que una caída
+larga de Finnhub no agote la cuota en la primera corrida de la mañana. Cuando se
+acaba, lo dice y sigue: `presupuesto_agotado proveedor=marketaux`.
+
+Su `sentiment_score` propio se descarta: el sistema clasifica el sentimiento con
+su propio modelo y anota cuál usó en `modelo_usado`. Mezclar dos escalas bajo la
+misma columna haría incomparables las filas.
+
+### Reddit: la app ya no basta
+
+**El tipo tiene que ser `script`**, no `web app` — es el único que autentica con
+la cuenta propia sin flujo OAuth. El `redirect uri` es obligatorio en el
+formulario aunque `script` no lo use nunca: pon `http://localhost:8080`.
+
+Una vez creada, el `client_id` es la cadena de **debajo del nombre de la app**,
+sin etiqueta; el `secret` sí va etiquetado.
+
+Pero desde junio de 2026, **crear la app no da acceso a la API**. Hay que
+solicitarlo aparte (el enlace *register to use the API* del propio formulario) y
+esperar aprobación bajo la Responsible Builder Policy: colas de 2 a 4 semanas, y
+los proyectos personales son la categoría con más rechazos. Describe el uso con
+precisión —cuántas lecturas, qué subreddits, sin publicar, sin fin comercial—;
+las descripciones vagas son las que caen.
+
+Si no llega la aprobación, el sistema funciona igual sin S2. Lee la sección
+[Con una sola fuente](#con-una-sola-fuente-lo-que-cambia).
+
+### Congreso
+
+**No tiene fuente viva hoy**: los datasets de stock-watcher devuelven 403 desde
+agosto de 2026. No hay clave que conseguir. S3 (peso 0.15) queda inactiva.
+
+### Con una sola fuente: lo que cambia
+
+Con S2 y S3 caídas queda solo S1. El sistema sigue funcionando —el score máximo
+alcanzable es 75/100, por encima del umbral de 60— pero cada sugerencia vendría
+de **un solo titular con confirmación de precio**, no del cruce de fuentes
+independientes que es la premisa del SPEC. El gestor de riesgo solo exige hoy
+que *alguna* señal tenga datos (`sin_evidencia`).
+
+Es un sistema que funciona con menos evidencia de la que su diseño supone. Está
+anotado en la bitácora y conviene decidirlo a conciencia, no por omisión.
 
 ---
 
@@ -134,6 +176,7 @@ TELEGRAM_BOT_TOKEN=TU_TOKEN_DE_BOTFATHER
 TELEGRAM_CHAT_ID_AUTORIZADO=TU_CHAT_ID
 
 FINNHUB_API_KEY=TU_CLAVE_FINNHUB
+MARKETAUX_API_KEY=TU_CLAVE_MARKETAUX
 REDDIT_CLIENT_ID=TU_CLIENT_ID
 REDDIT_CLIENT_SECRET=TU_CLIENT_SECRET
 REDDIT_USER_AGENT=investing_bot/0.1 por u/TU_USUARIO
@@ -304,6 +347,10 @@ en los logs? ¿está pausado el envío (`/reanudar`)? ¿está vinculado el chat
 **El digest llega pero dice «Sin sugerencias hoy».** Es un resultado válido, no
 un error — el sistema no fuerza operaciones. Pero si dice *«Ninguna señal tuvo
 datos suficientes»*, faltan las claves de Finnhub y Reddit del paso 2.
+
+**`presupuesto_agotado proveedor=marketaux`.** Se consumieron las 90 peticiones
+diarias, casi siempre porque Finnhub lleva horas caído. No es un fallo: el tope
+existe para que quede cuota mañana. Vuelve solo a medianoche UTC.
 
 **El dashboard muestra 0 barras de precio.** Aún no corrió la ingesta. Ejecuta
 el comando del paso 4.

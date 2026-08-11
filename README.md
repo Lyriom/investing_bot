@@ -132,12 +132,27 @@ una señal:
 | Clave | Señal que habilita | Peso |
 |---|---|---|
 | `FINNHUB_API_KEY` ([gratis](https://finnhub.io/register)) | S1, deriva post-noticia | 0.40 |
+| `MARKETAUX_API_KEY` ([gratis](https://www.marketaux.com/register)) | Respaldo de S1 | — |
 | `REDDIT_CLIENT_ID` + `REDDIT_CLIENT_SECRET` ([app tipo script](https://www.reddit.com/prefs/apps)) | S2, velocidad de menciones | 0.25 |
 | — | S3, consenso del Congreso | 0.15 |
+
+**Marketaux es respaldo, no una segunda opinión.** Solo se consulta para los tickers donde
+Finnhub no trajo nada o falló, y alimenta la misma señal S1: dos agregadores de titulares
+cubren en buena medida las mismas fuentes y no son independientes entre sí. Contarlos por
+separado sería el anti-objetivo del SPEC. Su plan gratuito da 100 peticiones al día y 3
+artículos por petición; el ingestor se limita solo a 90.
+
+**S2 depende de una aprobación manual.** Desde junio de 2026 crear la app de Reddit no da
+acceso a la API: hay que solicitarlo aparte bajo la Responsible Builder Policy, con colas de
+semanas y rechazos frecuentes para proyectos personales.
 
 **S3 no funciona hoy**: los datasets públicos de stock-watcher devuelven 403 desde agosto
 de 2026. El ingestor está construido y probado; falta una fuente viva. Las URLs son
 configurables (`URL_CONGRESO_CAMARA`, `URL_CONGRESO_SENADO`) para apuntar a un espejo.
+
+Con S2 y S3 caídas el sistema funciona con **una sola fuente**. Sigue produciendo
+sugerencias —el máximo alcanzable es 75/100, sobre el umbral de 60— pero cada una vendría de
+un solo titular, no del cruce de fuentes independientes que supone el diseño.
 
 Necesitas además **400 días de precios**, no 90: la señal de régimen compara SPY contra su
 media de 200 días, y sin esas barras el sistema entra en modo defensivo y no sugiere nada.
