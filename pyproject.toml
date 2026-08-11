@@ -1,0 +1,95 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "investing-bot"
+version = "0.1.0"
+description = "Generacion de senales de inversion para acciones y ETFs de EE.UU. El sistema sugiere; la persona decide."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Lyriom" }]
+
+# Dependencias de la FASE 0. Las fases posteriores agregan las suyas
+# (praw, transformers, torch, etc.) cuando toque implementarlas.
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "jinja2>=3.1",
+    "sqlalchemy[asyncio]>=2.0.36",
+    "asyncpg>=0.30",
+    "alembic>=1.14",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    "apscheduler>=3.10,<4",
+    "python-telegram-bot>=21.6",
+    "httpx>=0.27",
+    "structlog>=24.4",
+    "pandas>=2.2",
+    "numpy>=1.26",
+    "yfinance>=0.2.48",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "pytest-cov>=6.0",
+    "aiosqlite>=0.20",
+    "ruff>=0.7",
+    "mypy>=1.13",
+    "pandas-stubs>=2.2",
+]
+
+[project.scripts]
+investing-bot = "investing_bot.cli:principal"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+investing_bot = ["semillas/*.json", "web/plantillas/*.html", "web/estaticos/*"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+filterwarnings = [
+    "ignore::DeprecationWarning:aiosqlite.*",
+]
+
+[tool.coverage.run]
+source = ["src/investing_bot"]
+branch = true
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "C4"]
+ignore = [
+    "B008",  # FastAPI usa llamadas en defaults (Depends)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E501"]
+
+[tool.mypy]
+# Sin `python_version` fijo a proposito: se usa el del interprete que corre
+# mypy. Fijarlo en 3.11 rompe contra los stubs de numpy instalados para 3.12.
+mypy_path = "src"
+packages = ["investing_bot"]
+warn_unused_configs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+disallow_untyped_defs = true
+no_implicit_optional = true
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["yfinance.*", "apscheduler.*"]
+ignore_missing_imports = true

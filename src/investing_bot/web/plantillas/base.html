@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block titulo %}investing_bot{% endblock %}</title>
+  <script src="https://unpkg.com/htmx.org@2.0.3" defer></script>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --fondo: #0f1115;
+      --panel: #171a21;
+      --borde: #262b36;
+      --texto: #e6e8ec;
+      --tenue: #8b93a3;
+      --ok: #3fb950;
+      --fallo: #f85149;
+      --aviso: #d29922;
+    }
+    @media (prefers-color-scheme: light) {
+      :root {
+        --fondo: #f6f7f9; --panel: #ffffff; --borde: #e2e5ea;
+        --texto: #14161a; --tenue: #5c6472;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; padding: 2rem 1.25rem; background: var(--fondo); color: var(--texto);
+      font: 15px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+    main { max-width: 1080px; margin: 0 auto; }
+    h1 { font-size: 1.35rem; margin: 0 0 .25rem; letter-spacing: -.01em; }
+    h2 { font-size: .95rem; margin: 2rem 0 .75rem; text-transform: uppercase;
+         letter-spacing: .08em; color: var(--tenue); font-weight: 600; }
+    .subtitulo { color: var(--tenue); margin: 0 0 1.5rem; font-size: .9rem; }
+    .tarjetas { display: grid; gap: .75rem; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
+    .tarjeta { background: var(--panel); border: 1px solid var(--borde); border-radius: 10px; padding: .9rem 1rem; }
+    .tarjeta .valor { font-size: 1.6rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+    .tarjeta .etiqueta { color: var(--tenue); font-size: .78rem; text-transform: uppercase; letter-spacing: .05em; }
+    table { width: 100%; border-collapse: collapse; background: var(--panel);
+            border: 1px solid var(--borde); border-radius: 10px; overflow: hidden; }
+    th, td { padding: .5rem .75rem; text-align: left; border-bottom: 1px solid var(--borde); font-size: .875rem; }
+    th { color: var(--tenue); font-weight: 600; font-size: .75rem; text-transform: uppercase; letter-spacing: .05em; }
+    tbody tr:last-child td { border-bottom: none; }
+    .num { text-align: right; font-variant-numeric: tabular-nums; }
+    .tabla-envoltura { overflow-x: auto; }
+    .pastilla { display: inline-block; padding: .1rem .5rem; border-radius: 999px;
+                font-size: .72rem; font-weight: 600; letter-spacing: .03em; }
+    .pastilla.ok { background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok); }
+    .pastilla.fallo { background: color-mix(in srgb, var(--fallo) 18%, transparent); color: var(--fallo); }
+    .pastilla.pendiente { background: color-mix(in srgb, var(--aviso) 18%, transparent); color: var(--aviso); }
+    .tenue { color: var(--tenue); }
+    .aviso { border-left: 3px solid var(--aviso); padding: .6rem .9rem; margin: 1rem 0;
+             background: var(--panel); border-radius: 0 8px 8px 0; font-size: .875rem; }
+    button { font: inherit; background: transparent; color: var(--texto); cursor: pointer;
+             border: 1px solid var(--borde); border-radius: 6px; padding: .15rem .55rem; font-size: .78rem; }
+    button:hover { border-color: var(--tenue); }
+    footer { margin-top: 3rem; color: var(--tenue); font-size: .8rem; }
+  </style>
+</head>
+<body>
+  <main>
+    {% block contenido %}{% endblock %}
+    <footer>
+      investing_bot v0.1 &middot; FASE 0 &middot;
+      Este sistema no ejecuta ordenes en ningun broker (invariante I2).
+    </footer>
+  </main>
+</body>
+</html>

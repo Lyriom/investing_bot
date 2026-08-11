@@ -1,0 +1,42 @@
+# Secretos — invariante I5. Nunca, bajo ninguna circunstancia.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credenciales*.json
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+.venv/
+venv/
+env/
+
+# Herramientas
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Datos locales y artefactos
+datos/
+*.db
+*.sqlite3
+*.log
+modelos_descargados/
+
+# Sistema operativo / editores
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

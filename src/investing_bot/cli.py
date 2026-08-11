@@ -1,0 +1,153 @@
+"""Punto de entrada por linea de comandos.
+
+investing-bot migrar        aplica las migraciones de Alembic
+investing-bot sembrar       carga la whitelist inicial de instrumentos
+investing-bot ingesta       corre un ingestor a mano
+investing-bot api           levanta el dashboard
+investing-bot bot           levanta el bot de Telegram
+investing-bot planificador  levanta APScheduler
+"""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import sys
+from pathlib import Path
+
+from investing_bot import __version__
+from investing_bot.config import RAIZ_PROYECTO, obtener_config
+from investing_bot.db import cerrar_motor, sesion_bd
+from investing_bot.registro import configurar_logs, obtener_logger
+
+log = obtener_logger(__name__)
+
+INGESTORES_DISPONIBLES = ("precios",)
+
+
+def _localizar_alembic_ini() -> Path:
+    """Encuentra `alembic.ini` tanto en el contenedor como en el checkout local."""
+    for candidato in (RAIZ_PROYECTO / "alembic.ini", Path.cwd() / "alembic.ini"):
+        if candidato.is_file():
+            return candidato
+    raise FileNotFoundError(
+        "No se encontro alembic.ini. Corre el comando desde la raiz del proyecto."
+    )
+
+
+def comando_migrar(_: argparse.Namespace) -> int:
+    """Aplica las migraciones pendientes hasta `head`."""
+    from alembic import command
+    from alembic.config import Config
+
+    ini = _localizar_alembic_ini()
+    configuracion = Config(str(ini))
+    configuracion.set_main_option("script_location", str(ini.parent / "alembic"))
+    log.info("aplicando_migraciones", alembic_ini=str(ini))
+    command.upgrade(configuracion, "head")
+    log.info("migraciones_aplicadas")
+    return 0
+
+
+def comando_sembrar(args: argparse.Namespace) -> int:
+    """Carga la whitelist inicial en la tabla `tickers`."""
+    from investing_bot.servicios.siembra import sembrar_whitelist
+
+    async def ejecutar() -> None:
+        try:
+            async with sesion_bd() as sesion:
+                await sembrar_whitelist(sesion, args.archivo)
+        finally:
+            await cerrar_motor()
+
+    asyncio.run(ejecutar())
+    return 0
+
+
+def comando_ingesta(args: argparse.Namespace) -> int:
+    """Corre un ingestor de forma manual."""
+    from investing_bot.ingestores.precios import IngestorPrecios
+
+    async def ejecutar() -> int:
+        try:
+            ingestor = IngestorPrecios(dias=args.dias)
+            resultado = await ingestor.ejecutar_registrado()
+            return 0 if resultado.exito else 1
+        finally:
+            await cerrar_motor()
+
+    return asyncio.run(ejecutar())
+
+
+def comando_api(_: argparse.Namespace) -> int:
+    """Levanta el dashboard con uvicorn."""
+    import uvicorn
+
+    config = obtener_config()
+    uvicorn.run(
+        "investing_bot.web.app:app",
+        host=config.web_host,
+        port=config.web_puerto,
+        log_config=None,
+    )
+    return 0
+
+
+def comando_bot(_: argparse.Namespace) -> int:
+    """Levanta el bot de Telegram en modo polling."""
+    from investing_bot.telegram.bot import ejecutar_bot
+
+    ejecutar_bot()
+    return 0
+
+
+def comando_planificador(_: argparse.Namespace) -> int:
+    """Levanta APScheduler."""
+    from investing_bot.planificador import ejecutar_planificador
+
+    asyncio.run(ejecutar_planificador())
+    return 0
+
+
+def construir_parser() -> argparse.ArgumentParser:
+    """Define la interfaz de linea de comandos."""
+    parser = argparse.ArgumentParser(
+        prog="investing-bot",
+        description="Generacion de senales de inversion. El sistema no ejecuta ordenes.",
+    )
+    parser.add_argument("--version", action="version", version=f"investing-bot {__version__}")
+    sub = parser.add_subparsers(dest="comando", required=True)
+
+    sub.add_parser("migrar", help="Aplica las migraciones de Alembic").set_defaults(
+        funcion=comando_migrar
+    )
+
+    p_sembrar = sub.add_parser("sembrar", help="Carga la whitelist inicial de instrumentos")
+    p_sembrar.add_argument("--archivo", type=Path, default=None, help="Ruta a un whitelist.json")
+    p_sembrar.set_defaults(funcion=comando_sembrar)
+
+    p_ingesta = sub.add_parser("ingesta", help="Corre un ingestor a mano")
+    p_ingesta.add_argument("nombre", choices=INGESTORES_DISPONIBLES)
+    p_ingesta.add_argument(
+        "--dias", type=int, default=None, help="Dias de historial a traer (por defecto, config)"
+    )
+    p_ingesta.set_defaults(funcion=comando_ingesta)
+
+    sub.add_parser("api", help="Levanta el dashboard").set_defaults(funcion=comando_api)
+    sub.add_parser("bot", help="Levanta el bot de Telegram").set_defaults(funcion=comando_bot)
+    sub.add_parser("planificador", help="Levanta APScheduler").set_defaults(
+        funcion=comando_planificador
+    )
+    return parser
+
+
+def principal(argv: list[str] | None = None) -> int:
+    """Punto de entrada del ejecutable `investing-bot`."""
+    config = obtener_config()
+    configurar_logs(config.nivel_log, config.entorno)
+    args = construir_parser().parse_args(argv)
+    return int(args.funcion(args))
+
+
+if __name__ == "__main__":
+    sys.exit(principal())

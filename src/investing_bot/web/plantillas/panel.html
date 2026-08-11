@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+
+{% block contenido %}
+<h1>investing_bot</h1>
+<p class="subtitulo">
+  Entorno <strong>{{ entorno }}</strong> &middot; capital configurado USD {{ capital }}
+  &middot; el sistema sugiere, la persona decide.
+</p>
+
+<div class="tarjetas">
+  <div class="tarjeta">
+    <div class="etiqueta">Tickers en whitelist</div>
+    <div class="valor">{{ conteos.tickers_whitelist }}</div>
+  </div>
+  <div class="tarjeta">
+    <div class="etiqueta">Barras de precio</div>
+    <div class="valor">{{ conteos.barras_precio }}</div>
+  </div>
+  <div class="tarjeta">
+    <div class="etiqueta">Ejecuciones registradas</div>
+    <div class="valor">{{ conteos.ejecuciones }}</div>
+  </div>
+</div>
+
+<h2>Estado del pipeline</h2>
+<div class="tabla-envoltura">
+<table>
+  <thead>
+    <tr>
+      <th>Ingestor</th><th>Estado</th><th>Ultima corrida</th>
+      <th class="num">Nuevas</th><th class="num">Actualizadas</th><th class="num">Duracion</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for ing in ingestores %}
+    <tr>
+      <td><strong>{{ ing.nombre }}</strong></td>
+      <td>
+        {% if not ing.implementado %}
+          <span class="pastilla pendiente">FASE 1</span>
+        {% elif ing.ultima_corrida is none %}
+          <span class="pastilla pendiente">sin corridas</span>
+        {% elif ing.exito %}
+          <span class="pastilla ok">ok</span>
+        {% else %}
+          <span class="pastilla fallo">fallo</span>
+        {% endif %}
+      </td>
+      <td class="tenue">
+        {% if ing.ultima_corrida %}{{ ing.ultima_corrida.strftime('%Y-%m-%d %H:%M UTC') }}{% else %}&mdash;{% endif %}
+        {% if ing.errores %}<br><span style="color:var(--fallo)">{{ ing.errores[0] }}</span>{% endif %}
+      </td>
+      <td class="num">{{ ing.filas_nuevas }}</td>
+      <td class="num">{{ ing.filas_actualizadas }}</td>
+      <td class="num tenue">{% if ing.duracion_seg %}{{ '%.1f'|format(ing.duracion_seg) }}s{% else %}&mdash;{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+
+<h2>Instrumentos y cobertura de precios</h2>
+<div class="tabla-envoltura">
+<table>
+  <thead>
+    <tr>
+      <th>Symbol</th><th>Nombre</th><th>Sector</th>
+      <th class="num">Ultimo</th><th class="num">Vol. prom. 30d</th>
+      <th class="num">Barras</th><th>Rango</th><th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for t in tickers %}
+    <tr>
+      <td><strong>{{ t.symbol }}</strong></td>
+      <td>{{ t.nombre or '—' }}</td>
+      <td class="tenue">{{ t.sector or '—' }}</td>
+      <td class="num">{% if t.precio_ultimo %}{{ '%.2f'|format(t.precio_ultimo) }}{% else %}&mdash;{% endif %}</td>
+      <td class="num tenue">{% if t.volumen_promedio_30d %}{{ '{:,.0f}'.format(t.volumen_promedio_30d) }}{% else %}&mdash;{% endif %}</td>
+      <td class="num">{{ t.barras }}</td>
+      <td class="tenue">
+        {% if t.primera_fecha %}{{ t.primera_fecha }} → {{ t.ultima_fecha }}{% else %}sin datos{% endif %}
+      </td>
+      <td>
+        {% if t.barras %}
+        <button hx-get="/precios/{{ t.symbol }}" hx-target="#detalle" hx-swap="innerHTML">ver</button>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+
+<div id="detalle"></div>
+
+<div class="aviso">
+  <strong>FASE 0.</strong> No hay senales, sugerencias ni portafolio todavia.
+  Las senales se implementan en la FASE 3, despues de que el backtester de la
+  FASE 2 demuestre que no puede leer datos futuros (invariante I1).
+</div>
+{% endblock %}

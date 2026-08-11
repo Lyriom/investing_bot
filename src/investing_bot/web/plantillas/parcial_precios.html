@@ -1,0 +1,33 @@
+{# Fragmento HTMX: ultimas barras de un simbolo. #}
+<h2>{{ symbol }} — ultimas {{ barras|length }} barras</h2>
+<div class="tabla-envoltura">
+<table>
+  <thead>
+    <tr>
+      <th>Fecha</th>
+      <th class="num">Apertura</th><th class="num">Maximo</th><th class="num">Minimo</th>
+      <th class="num">Cierre</th><th class="num">Ajustado</th><th class="num">Volumen</th>
+      <th>observed_at</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for b in barras %}
+    <tr>
+      <td>{{ b.fecha }}</td>
+      <td class="num">{% if b.apertura %}{{ '%.2f'|format(b.apertura) }}{% else %}&mdash;{% endif %}</td>
+      <td class="num">{% if b.maximo %}{{ '%.2f'|format(b.maximo) }}{% else %}&mdash;{% endif %}</td>
+      <td class="num">{% if b.minimo %}{{ '%.2f'|format(b.minimo) }}{% else %}&mdash;{% endif %}</td>
+      <td class="num"><strong>{{ '%.2f'|format(b.cierre) }}</strong></td>
+      <td class="num tenue">{% if b.cierre_ajustado %}{{ '%.2f'|format(b.cierre_ajustado) }}{% else %}&mdash;{% endif %}</td>
+      <td class="num tenue">{% if b.volumen %}{{ '{:,}'.format(b.volumen) }}{% else %}&mdash;{% endif %}</td>
+      <td class="tenue">{{ b.observed_at.strftime('%Y-%m-%d %H:%M UTC') }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+<p class="tenue" style="font-size:.8rem">
+  <code>observed_at</code> es el instante mas temprano en que el sistema pudo conocer
+  la barra (cierre + 1 h), no el momento de la ingesta. Es la columna por la que el
+  backtester filtra — nunca por <code>fecha</code>.
+</p>

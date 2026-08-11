@@ -1,0 +1,87 @@
+name: investing-bot
+
+x-entorno-comun: &entorno-comun
+  ENTORNO: ${ENTORNO:-desarrollo}
+  NIVEL_LOG: ${NIVEL_LOG:-INFO}
+  POSTGRES_HOST: db
+  POSTGRES_PORT: 5432
+  POSTGRES_DB: ${POSTGRES_DB:-investing_bot}
+  POSTGRES_USER: ${POSTGRES_USER:-investing}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-investing_local}
+  TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+  TELEGRAM_CHAT_ID_AUTORIZADO: ${TELEGRAM_CHAT_ID_AUTORIZADO:-0}
+  CAPITAL_TOTAL_USD: ${CAPITAL_TOTAL_USD:-150}
+  DIAS_HISTORIAL_PRECIOS_INICIAL: ${DIAS_HISTORIAL_PRECIOS_INICIAL:-90}
+  ZONA_HORARIA_MERCADO: ${ZONA_HORARIA_MERCADO:-America/New_York}
+  ZONA_HORARIA_OPERADOR: ${ZONA_HORARIA_OPERADOR:-America/Guayaquil}
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-investing_bot}
+      POSTGRES_USER: ${POSTGRES_USER:-investing}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-investing_local}
+    volumes:
+      - datos_postgres:/var/lib/postgresql/data
+    ports:
+      # Expuesto para poder inspeccionar con psql desde el host.
+      - "${POSTGRES_PUERTO_HOST:-5433}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-investing} -d ${POSTGRES_DB:-investing_bot}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # Aplica las migraciones y siembra la whitelist. Corre una vez y termina.
+  # Todo lo demas espera a que este servicio complete con exito.
+  migraciones:
+    build: .
+    restart: "no"
+    environment: *entorno-comun
+    depends_on:
+      db:
+        condition: service_healthy
+    command: >
+      sh -c "investing-bot migrar && investing-bot sembrar"
+
+  app:
+    build: .
+    restart: unless-stopped
+    environment: *entorno-comun
+    depends_on:
+      migraciones:
+        condition: service_completed_successfully
+    ports:
+      - "${WEB_PUERTO_HOST:-8000}:8000"
+    command: ["investing-bot", "api"]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/salud"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  planificador:
+    build: .
+    restart: unless-stopped
+    environment: *entorno-comun
+    depends_on:
+      migraciones:
+        condition: service_completed_successfully
+    command: ["investing-bot", "planificador"]
+
+  bot:
+    build: .
+    # Si no hay token configurado, el proceso registra el motivo y sale con 0.
+    # Con `on-failure` eso no genera un bucle de reinicios.
+    restart: on-failure
+    environment: *entorno-comun
+    depends_on:
+      migraciones:
+        condition: service_completed_successfully
+    command: ["investing-bot", "bot"]
+
+volumes:
+  datos_postgres:
