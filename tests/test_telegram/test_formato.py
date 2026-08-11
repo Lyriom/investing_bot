@@ -42,7 +42,7 @@ def test_el_estado_distingue_pendiente_de_fallo() -> None:
                 exito=True,
                 filas_nuevas=30,
             ),
-            EstadoIngestor(nombre="noticias", implementado=False),
+            EstadoIngestor(nombre="noticias", implementado=True),
             EstadoIngestor(
                 nombre="reddit",
                 implementado=True,
@@ -55,13 +55,13 @@ def test_el_estado_distingue_pendiente_de_fallo() -> None:
     )
     assert "1860" in texto
     assert "precios" in texto and "ok" in texto
-    assert "pendiente (FASE 1)" in texto
+    assert "sin corridas todavia" in texto
     assert "FALLO" in texto
     assert "429 rate limit" in texto
 
 
-def test_el_estado_no_finge_tener_portafolio_en_fase_0() -> None:
-    """Mostrar un portafolio vacio se leeria como informacion real. Se dice la verdad."""
+def test_el_estado_dice_cuando_no_hay_posiciones() -> None:
+    """Un portafolio vacio se dice con palabras, no con ceros ambiguos."""
     texto = formatear_estado(
         entorno="desarrollo",
         capital_usd=Decimal("150"),
@@ -69,4 +69,30 @@ def test_el_estado_no_finge_tener_portafolio_en_fase_0() -> None:
         ingestores=[],
         zona_operador="America/Guayaquil",
     )
-    assert "no disponibles en FASE 0" in texto
+    assert "sin posiciones abiertas" in texto
+
+
+def test_el_estado_avisa_cuando_los_envios_estan_pausados() -> None:
+    texto = formatear_estado(
+        entorno="desarrollo",
+        capital_usd=Decimal("150"),
+        conteos={},
+        ingestores=[],
+        zona_operador="America/Guayaquil",
+        pausado=True,
+    )
+    assert "ENVIOS PAUSADOS" in texto
+
+
+def test_el_estado_lista_las_posiciones_sombra() -> None:
+    texto = formatear_estado(
+        entorno="desarrollo",
+        capital_usd=Decimal("150"),
+        conteos={},
+        ingestores=[],
+        zona_operador="America/Guayaquil",
+        posiciones=[("NVDA", 178.40, 169.00)],
+    )
+    assert "NVDA" in texto
+    assert "178.40" in texto
+    assert "169.00" in texto

@@ -14,25 +14,27 @@ del diseño. Las decisiones y resultados, incluidos los negativos, van a
 
 ---
 
-## Estado: FASE 0 — Cimientos
-
-El SPEC manda trabajar **una fase a la vez**. Lo implementado hoy:
+## Estado: FASES 0, 1 y 3 — falta la 2
 
 | | Componente | Estado |
 |---|---|---|
-| ✅ | Docker Compose (postgres + migraciones + app + planificador + bot) | listo |
-| ✅ | Esquema completo de las 11 tablas + Alembic | listo |
-| ✅ | `config.py` con pydantic-settings | listo |
-| ✅ | Ingestor de precios (yfinance), idempotente y tolerante a fallo | listo |
-| ✅ | Bot de Telegram con `/start` y `/estado`, solo para el chat autorizado | listo |
-| ✅ | Dashboard con estado del pipeline y cobertura de datos | listo |
-| ✅ | Imagen multi-stage y compose de producción para el servidor | listo |
-| ⬜ | Ingestores de noticias, Reddit y Congreso; normalizador; FinBERT | FASE 1 |
-| ⬜ | Backtester point-in-time | FASE 2 |
-| ⬜ | Señales, gestor de riesgo, digest diario | FASE 3 |
+| ✅ | Docker Compose, esquema de 11 tablas, Alembic, imagen multi-stage | FASE 0 |
+| ✅ | Los cuatro ingestores: precios, noticias, Reddit, Congreso | FASE 1 |
+| ✅ | Resolución de entidades y deduplicación de noticias | FASE 1 |
+| ✅ | Sentimiento con FinBERT (extra opcional) y respaldo léxico | FASE 1 |
+| ✅ | Capa point-in-time: toda lectura filtra por `observed_at` | FASE 3 |
+| ✅ | Las cuatro señales, el motor de combinación y el gestor de riesgo | FASE 3 |
+| ✅ | Digest diario a las 18:15 ET y los seis comandos del bot | FASE 3 |
+| ⛔ | **Backtester** | **FASE 2, pendiente** |
+| ⬜ | Portafolio sombra medido durante 3 meses | FASE 4 |
 
-No hay señales ni sugerencias todavía, y eso es deliberado: el invariante I4 prohíbe
-tocar pesos antes de que el backtester de la FASE 2 esté validado.
+> ⚠ **Las señales no han pasado por ningún backtest.** Se construyó la FASE 3 antes que la
+> FASE 2 a petición explícita del operador. Nadie ha comprobado todavía que estas señales
+> superen a comprar SPY y quedarse quieto, ni qué les pasa con un día de retraso en la
+> ejecución. El digest lo advierte en cada envío. **No operes con dinero real hasta correr
+> la FASE 2.**
+
+Los pesos (0.40 / 0.25 / 0.15) son provisionales y arbitrarios, como manda el invariante I4.
 
 ---
 
@@ -106,20 +108,40 @@ quien construya sin `--target` obtiene la imagen de servidor, no la de desarroll
 ## Comandos
 
 ```bash
-investing-bot migrar                     # aplica migraciones de Alembic
-investing-bot sembrar                    # carga la whitelist de instrumentos
-investing-bot ingesta precios --dias 90  # corre el ingestor a mano
-investing-bot api                        # dashboard
-investing-bot bot                        # bot de Telegram (polling)
-investing-bot planificador               # APScheduler
+investing-bot migrar                      # aplica migraciones de Alembic
+investing-bot sembrar                     # carga la whitelist de instrumentos
+investing-bot ingesta precios --dias 400  # un ingestor a mano (o `todos`)
+investing-bot digest                      # genera el digest del dia
+investing-bot digest --enviar             # lo manda por Telegram
+investing-bot api                         # dashboard
+investing-bot bot                         # bot de Telegram (polling)
+investing-bot planificador                # APScheduler
 ```
+
+### Para que el sistema produzca algo
+
+Con las claves vacías el digest sale **sin sugerencias**, y lo dice. Cada clave habilita
+una señal:
+
+| Clave | Señal que habilita | Peso |
+|---|---|---|
+| `FINNHUB_API_KEY` ([gratis](https://finnhub.io/register)) | S1, deriva post-noticia | 0.40 |
+| `REDDIT_CLIENT_ID` + `REDDIT_CLIENT_SECRET` ([app tipo script](https://www.reddit.com/prefs/apps)) | S2, velocidad de menciones | 0.25 |
+| — | S3, consenso del Congreso | 0.15 |
+
+**S3 no funciona hoy**: los datasets públicos de stock-watcher devuelven 403 desde agosto
+de 2026. El ingestor está construido y probado; falta una fuente viva. Las URLs son
+configurables (`URL_CONGRESO_CAMARA`, `URL_CONGRESO_SENADO`) para apuntar a un espejo.
+
+Necesitas además **400 días de precios**, no 90: la señal de régimen compara SPY contra su
+media de 200 días, y sin esas barras el sistema entra en modo defensivo y no sugiere nada.
 
 ## Desarrollo local
 
 ```bash
 python3.11 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
-pytest -q          # 77 tests, sobre sqlite en memoria: sin contenedor y sin red
+pytest -q          # 215 tests, sobre sqlite en memoria: sin contenedor y sin red
 ruff check . && ruff format --check .
 mypy
 ```

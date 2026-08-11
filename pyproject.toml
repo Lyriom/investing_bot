@@ -29,9 +29,18 @@ dependencies = [
     "pandas>=2.2",
     "numpy>=1.26",
     "yfinance>=0.2.48",
+    "praw>=7.8",
 ]
 
 [project.optional-dependencies]
+# FinBERT. Separado del nucleo a proposito: torch pesa ~2 GB y triplicaria la
+# imagen de servidor. Sin este extra, el sistema clasifica con un lexico
+# financiero mucho mas pobre, pero lo declara en `modelo_usado` para que nunca
+# se confunda una cosa con la otra.
+nlp = [
+    "transformers>=4.44",
+    "torch>=2.4",
+]
 dev = [
     "pytest>=8.3",
     "pytest-asyncio>=0.24",

@@ -9,13 +9,15 @@ from decimal import Decimal
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from investing_bot.modelos.congreso import CongresoTrade
 from investing_bot.modelos.corrida_ingesta import CorridaIngesta
 from investing_bot.modelos.ejecucion import Ejecucion
+from investing_bot.modelos.noticia import Noticia
 from investing_bot.modelos.precio import PrecioDiario
+from investing_bot.modelos.reddit import RedditDiario
 from investing_bot.modelos.ticker import Ticker
 
-# Ingestores contemplados por el SPEC. Los de la FASE 1 aparecen como
-# "pendiente" en el dashboard, en lugar de simplemente no existir.
+# Los cuatro ingestores del SPEC 6.1, todos implementados.
 INGESTORES_ESPERADOS = ("precios", "noticias", "reddit", "congreso")
 
 
@@ -63,7 +65,7 @@ async def estado_ingestores(sesion: AsyncSession) -> list[EstadoIngestor]:
     for nombre in INGESTORES_ESPERADOS:
         ultima = ultima_por_ingestor.get(nombre)
         if ultima is None:
-            estados.append(EstadoIngestor(nombre=nombre, implementado=nombre == "precios"))
+            estados.append(EstadoIngestor(nombre=nombre, implementado=True))
             continue
         errores = None
         if ultima.errores:
@@ -131,6 +133,28 @@ async def conteos_generales(sesion: AsyncSession) -> dict[str, int]:
         ),
         "barras_precio": int(
             await sesion.scalar(sa.select(sa.func.count()).select_from(PrecioDiario)) or 0
+        ),
+        "noticias": int(
+            await sesion.scalar(
+                sa.select(sa.func.count())
+                .select_from(Noticia)
+                .where(Noticia.es_duplicado.is_(False))
+            )
+            or 0
+        ),
+        "noticias_duplicadas": int(
+            await sesion.scalar(
+                sa.select(sa.func.count())
+                .select_from(Noticia)
+                .where(Noticia.es_duplicado.is_(True))
+            )
+            or 0
+        ),
+        "reddit": int(
+            await sesion.scalar(sa.select(sa.func.count()).select_from(RedditDiario)) or 0
+        ),
+        "congreso": int(
+            await sesion.scalar(sa.select(sa.func.count()).select_from(CongresoTrade)) or 0
         ),
         "ejecuciones": int(
             await sesion.scalar(sa.select(sa.func.count()).select_from(Ejecucion)) or 0

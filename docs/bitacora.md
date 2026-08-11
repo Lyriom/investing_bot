@@ -271,3 +271,118 @@ nada — pero tampoco aporta. `EJECUTAR_MIGRACIONES=true` va solo en `investing`
   expone fuera de ese proxy, hace falta auth de verdad.
 - No hay despliegue automático por push. Easypanel puede hacerlo con un webhook de GitHub;
   no está configurado.
+
+---
+
+## 2026-08-11 — FASES 1 y 3: datos, señales y alertas
+
+### Contexto de la decisión
+
+El operador pidió las alertas dos veces, sabiendo que el SPEC ordena hacer la FASE 2
+(backtester) antes que la FASE 3. Se construyeron igual, con dos salvaguardas: el digest
+lleva una advertencia fija de que las señales no pasaron por ningún backtest, y todo
+entra al portafolio sombra, sin dinero real. **Esto no sustituye a la FASE 2.**
+
+### Qué se construyó
+
+**FASE 1 — datos**
+
+- Ingestores de noticias (Finnhub), Reddit (praw) y Congreso (stock-watcher).
+- Resolución de entidades en cascada: cashtag → alias curado → nombre de empresa →
+  símbolo suelto no ambiguo.
+- Deduplicación en dos niveles: hash del titular normalizado + similitud de Jaccard,
+  ambos en ventana de 48 h.
+- Clasificación de sentimiento con FinBERT y respaldo léxico.
+
+**FASE 3 — señales y digest**
+
+- `datos/repositorio_pit.py`: **toda** lectura que alimenta una señal pasa por aquí y
+  filtra por `observed_at`. Es la pieza que hace cumplir el invariante I1.
+- Las cuatro señales, el motor de combinación, el gestor de riesgo con 11 reglas de veto.
+- Digest diario a las 18:15 ET; comandos `/hoy`, `/desglose`, `/registrar`, `/pausar`,
+  `/reanudar`.
+
+### Qué se midió
+
+| Medición | Resultado |
+|---|---|
+| Tests | **215 pasan** (antes 81) |
+| Cobertura de `datos/` | **100 %** |
+| Cobertura de `senales/` | 87–100 % por módulo |
+| Cobertura de `riesgo/` | 93 % |
+| Reducción por deduplicación (set sintético) | **70 %** |
+| Falsos positivos de entidades sobre 10 casos trampa | **0** |
+| Régimen calculado sobre 400 días reales | SPY **+9,4 %** sobre su MA200 → alcista |
+| Barras en la base | 12 000 (30 tickers × 400 días) |
+
+### Hallazgos
+
+**1. Los parámetros por defecto del SPEC son mutuamente incompatibles.**
+
+`MAX_PCT_POR_POSICION = 0.25` y `MIN_TAMANO_POSICION_USD = 50` implican un capital mínimo
+de **200 USD**. Con los 100–150 que el SPEC propone para empezar, la posición máxima serían
+37,50 USD, por debajo del mínimo viable, y **el sistema no emitiría jamás una sugerencia**.
+
+El código lo detecta y veta con un mensaje explícito, en vez de inflar la posición hasta el
+mínimo — que era lo que hacía la primera versión y rompía el límite de concentración que
+`max_pct_por_posicion` existe para imponer. Un test lo fija.
+
+**2. La fuente del Congreso está caída.**
+
+Los datasets de house-stock-watcher y senate-stock-watcher devuelven **403 Forbidden**. Se
+verificó contra las dos URLs; solo responde el sitio oficial del Clerk de la Cámara, que
+sirve PDFs y requiere un parser entero. El ingestor está construido y probado con 14 tests
+sobre datos sintéticos; lo que falta es una fuente viva, no código. Las URLs pasaron a ser
+configurables para poder apuntar a un espejo sin tocar el código.
+
+Lo que sí quedó demostrado en producción: la tolerancia a fallo del SPEC 6.1 funciona. Las
+dos cámaras fallaron, se registró el error en `corridas_ingesta`, y ni el pipeline ni los
+demás ingestores se enteraron.
+
+**3. Los dígitos no se pueden descartar como ruido al deduplicar.**
+
+Un test destapó que `tokens_significativos` eliminaba los tokens de un carácter, de modo que
+"recalls 2 million" y "recalls 3 million" producían el mismo hash y una de las dos se perdía
+como duplicado. En un titular financiero la cifra suele ser la noticia.
+
+### Decisiones
+
+**El peso de una señal sin datos no se reparte entre las demás.** Se divide siempre por el
+peso total (0.80), no por el de las señales con datos. Si se repartiera, dos señales podrían
+fingir la convicción de tres, y un ticker con una sola fuente parecería tan sólido como uno
+con las tres.
+
+**50 es el score neutro, no 0.** Ausencia de evidencia no es evidencia en contra.
+
+**El régimen solo puede recortar un score, nunca subirlo.** Y si no hay 200 barras para
+medirlo, el régimen es `desconocido` y **eso también activa el modo defensivo**: no saber en
+qué mercado estamos no es razón para comprar.
+
+**FinBERT es un extra opcional.** torch pesa ~2 GB y triplicaría la imagen de servidor. Sin
+el extra `nlp` se clasifica con un léxico mucho más pobre — y cada fila guarda en
+`modelo_usado` con cuál se clasificó, para que al analizar resultados nunca se confunda una
+salida de FinBERT con una del léxico.
+
+**La señal de deriva ignora las noticias de las últimas 24 h.** Competir por velocidad contra
+firmas colocadas en el datacenter del NASDAQ, desde una conexión doméstica en Quito, no es
+una estrategia.
+
+### Estado real del sistema
+
+Con las claves de API vacías, el digest sale **sin sugerencias** y lo dice: *"Ninguna señal
+tuvo datos suficientes"*. Es correcto, no un fallo. Para que produzca algo hacen falta:
+
+- `FINNHUB_API_KEY` → habilita S1 (peso 0.40)
+- `REDDIT_CLIENT_ID` / `REDDIT_CLIENT_SECRET` → habilita S2 (peso 0.25)
+- Una fuente viva del Congreso → habilitaría S3 (peso 0.15)
+
+Solo con S1 el score máximo alcanzable es 75/100, por encima del umbral de 60. Con S1+S2 el
+sistema ya puede sugerir con dos fuentes independientes.
+
+### Pendiente, y es lo importante
+
+**La FASE 2 sigue sin hacerse.** Estas señales no han demostrado nada: los pesos son
+arbitrarios (I4), nadie ha medido si superan a comprar SPY y quedarse quieto, y nadie ha
+comprobado qué pasa con `retraso_entrada_dias = 1`. Hasta que el backtester exista y diga
+algo, el digest es un ejercicio de ingeniería, no una recomendación de inversión — y el
+propio mensaje lo dice en cada envío.

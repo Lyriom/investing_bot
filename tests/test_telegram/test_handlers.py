@@ -83,8 +83,8 @@ async def test_estado_reporta_los_datos_reales(motor: object, sesion: AsyncSessi
     await comando_estado(UpdateFalso(ChatFalso(CHAT_AUTORIZADO)), contexto)  # type: ignore[arg-type]
 
     texto = contexto.bot.enviados[0]["text"]
-    assert "Tickers en whitelist : 1" in texto
-    assert "pendiente (FASE 1)" in texto
+    assert "Tickers en whitelist   : 1" in texto
+    assert "sin corridas todavia" in texto
 
 
 async def test_los_handlers_ignoran_updates_sin_chat(motor: object) -> None:

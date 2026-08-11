@@ -86,8 +86,36 @@ class Configuracion(BaseSettings):
 
     # --- Ingesta ---------------------------------------------------------
     dias_historial_precios_inicial: int = 90
+    dias_historial_congreso: int = 180
+    dias_historial_noticias: int = 7
+    horas_ventana_reddit: int = 24
+    subreddits: str = "wallstreetbets,stocks,investing"
+    # Fuentes del Congreso. Configurables porque los datasets publicos de
+    # stock-watcher dejaron de responder (403) en agosto de 2026: asi se puede
+    # apuntar a un espejo sin tocar codigo. Ver docs/bitacora.md.
+    url_congreso_camara: str = (
+        "https://house-stock-watcher-data.s3-us-west-2.amazonaws.com/data/all_transactions.json"
+    )
+    url_congreso_senado: str = "https://senate-stock-watcher-data.s3-us-west-2.amazonaws.com/aggregate/all_transactions.json"
+    limite_posts_reddit: int = 300
     reintentos_max: int = 4
     backoff_base_seg: float = 1.5
+    # Fuerza el lexico aunque FinBERT este instalado. Util para tests y para
+    # servidores donde cargar torch no es viable.
+    forzar_sentimiento_lexico: bool = False
+
+    # --- Senales (FASE 3) ------------------------------------------------
+    # Pesos PROVISIONALES, fijos y arbitrarios (invariante I4). No se tocan
+    # hasta que el backtester de la FASE 2 diga algo.
+    version_modelo: str = "pesos-v1"
+    peso_deriva_noticias: float = 0.40
+    peso_velocidad_reddit: float = 0.25
+    peso_consenso_congreso: float = 0.15
+    umbral_sugerencia: int = 60
+    # En regimen de riesgo el score por encima de 50 se multiplica por esto.
+    multiplicador_regimen_riesgo: float = 0.75
+    dias_media_movil_regimen: int = 200
+    symbol_referencia_regimen: str = "SPY"
 
     # --- Zonas horarias --------------------------------------------------
     zona_horaria_mercado: str = "America/New_York"

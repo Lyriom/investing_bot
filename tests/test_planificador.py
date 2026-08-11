@@ -39,9 +39,23 @@ def test_la_ingesta_no_se_solapa_consigo_misma() -> None:
     assert job.coalesce is True
 
 
-def test_no_se_adelantan_jobs_de_fases_posteriores() -> None:
-    """El digest diario y los otros ingestores son FASE 1 y 3."""
-    assert list(_jobs()) == ["ingesta_precios"]
+def test_estan_registrados_los_cuatro_ingestores_y_el_digest() -> None:
+    """Criterio de la FASE 1: los cuatro ingestores corren sin intervencion."""
+    assert set(_jobs()) == {
+        "ingesta_precios",
+        "ingesta_noticias",
+        "ingesta_reddit",
+        "ingesta_congreso",
+        "digest_diario",
+    }
+
+
+def test_el_digest_sale_despues_de_la_ingesta_de_precios() -> None:
+    """18:15 ET: con los precios del dia ya en la base."""
+    campos = {c.name: str(c) for c in _jobs()["digest_diario"].trigger.fields}
+    assert campos["hour"] == "18"
+    assert campos["minute"] == "15"
+    assert campos["day_of_week"] == "mon-fri"
 
 
 async def test_sigterm_apaga_el_planificador_sin_esperar_al_kill(motor: object) -> None:

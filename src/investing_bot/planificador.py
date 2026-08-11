@@ -1,46 +1,67 @@
 """Planificador de tareas (APScheduler).
 
-FASE 0 registra un unico job: la ingesta diaria de precios tras el cierre del
-mercado. Los jobs de noticias, Reddit, Congreso y el digest diario se agregan
-en las fases 1 y 3.
+Cadencia del SPEC 6.1 y 8. Todos los jobs corren en horario de Nueva York,
+porque lo que marca el ritmo es el mercado, no el operador.
 """
 
 from __future__ import annotations
 
 import asyncio
 import signal
+from collections.abc import Awaitable, Callable
 from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 
 from investing_bot.config import obtener_config
 from investing_bot.db import cerrar_motor
-from investing_bot.ingestores.precios import IngestorPrecios
+from investing_bot.ingestores import INGESTORES
 from investing_bot.registro import obtener_logger
+from investing_bot.servicios.digest import ejecutar_digest_diario
 
 log = obtener_logger(__name__)
 
-# La ingesta corre a las 17:00 ET: una hora despues del cierre, con margen
-# para que la barra del dia este consolidada en la fuente.
+# La ingesta de precios corre a las 17:00 ET: una hora despues del cierre, con
+# margen para que la barra del dia este consolidada en la fuente.
 HORA_INGESTA_PRECIOS = 17
 MINUTO_INGESTA_PRECIOS = 0
 
+# El digest sale a las 18:15 ET, con los precios del dia ya en la base.
+HORA_DIGEST = 18
+MINUTO_DIGEST = 15
 
-async def job_ingesta_precios() -> None:
-    """Ingesta diaria de precios. Nunca propaga excepciones."""
-    ingestor = IngestorPrecios()
-    await ingestor.ejecutar_registrado()
+
+def _job_ingestor(nombre: str) -> Callable[[], Awaitable[None]]:
+    """Crea el callable de un ingestor. Nunca propaga excepciones."""
+
+    async def job() -> None:
+        ingestor = INGESTORES[nombre]()
+        await ingestor.ejecutar_registrado()
+
+    job.__name__ = f"job_ingesta_{nombre}"
+    return job
+
+
+async def job_digest_diario() -> None:
+    """Digest diario. Un fallo aqui no debe tumbar el planificador."""
+    try:
+        await ejecutar_digest_diario()
+    except Exception:  # noqa: BLE001 - el planificador sobrevive a un digest roto
+        log.exception("digest_fallo")
 
 
 def construir_planificador() -> AsyncIOScheduler:
-    """Arma el planificador con los jobs de la fase actual."""
+    """Arma el planificador con todos los jobs."""
     config = obtener_config()
     zona = ZoneInfo(config.zona_horaria_mercado)
     planificador = AsyncIOScheduler(timezone=zona)
 
+    comun = {"replace_existing": True, "coalesce": True, "max_instances": 1}
+
     planificador.add_job(
-        job_ingesta_precios,
+        _job_ingestor("precios"),
         trigger=CronTrigger(
             day_of_week="mon-fri",
             hour=HORA_INGESTA_PRECIOS,
@@ -49,11 +70,48 @@ def construir_planificador() -> AsyncIOScheduler:
         ),
         id="ingesta_precios",
         name="Ingesta diaria de precios",
-        replace_existing=True,
         misfire_grace_time=3600,
-        coalesce=True,
-        max_instances=1,
+        **comun,
     )
+
+    planificador.add_job(
+        _job_ingestor("noticias"),
+        trigger=IntervalTrigger(hours=4, timezone=zona),
+        id="ingesta_noticias",
+        name="Ingesta de noticias (cada 4 h)",
+        misfire_grace_time=1800,
+        **comun,
+    )
+
+    planificador.add_job(
+        _job_ingestor("reddit"),
+        trigger=IntervalTrigger(hours=6, timezone=zona),
+        id="ingesta_reddit",
+        name="Ingesta de Reddit (cada 6 h)",
+        misfire_grace_time=1800,
+        **comun,
+    )
+
+    planificador.add_job(
+        _job_ingestor("congreso"),
+        trigger=CronTrigger(hour=6, minute=30, timezone=zona),
+        id="ingesta_congreso",
+        name="Ingesta diaria del Congreso",
+        misfire_grace_time=7200,
+        **comun,
+    )
+
+    planificador.add_job(
+        job_digest_diario,
+        trigger=CronTrigger(
+            day_of_week="mon-fri", hour=HORA_DIGEST, minute=MINUTO_DIGEST, timezone=zona
+        ),
+        id="digest_diario",
+        name="Digest diario de sugerencias",
+        misfire_grace_time=3600,
+        **comun,
+    )
+
     return planificador
 
 

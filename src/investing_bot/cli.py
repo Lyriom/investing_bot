@@ -19,11 +19,12 @@ from pathlib import Path
 from investing_bot import __version__
 from investing_bot.config import RAIZ_PROYECTO, obtener_config
 from investing_bot.db import cerrar_motor, sesion_bd
+from investing_bot.ingestores import INGESTORES
 from investing_bot.registro import configurar_logs, obtener_logger
 
 log = obtener_logger(__name__)
 
-INGESTORES_DISPONIBLES = ("precios",)
+INGESTORES_DISPONIBLES = tuple(INGESTORES)
 
 
 def _localizar_alembic_ini() -> Path:
@@ -104,14 +105,51 @@ def comando_sembrar(args: argparse.Namespace) -> int:
 
 
 def comando_ingesta(args: argparse.Namespace) -> int:
-    """Corre un ingestor de forma manual."""
-    from investing_bot.ingestores.precios import IngestorPrecios
+    """Corre uno o todos los ingestores de forma manual."""
+
+    async def ejecutar() -> int:
+        nombres = list(INGESTORES) if args.nombre == "todos" else [args.nombre]
+        try:
+            fallos = 0
+            for nombre in nombres:
+                clase = INGESTORES[nombre]
+                # `dias` solo lo aceptan los ingestores con ventana temporal.
+                ingestor = clase(dias=args.dias) if args.dias is not None else clase()  # type: ignore[call-arg]
+                resultado = await ingestor.ejecutar_registrado()
+                if not resultado.exito:
+                    fallos += 1
+            return 1 if fallos == len(nombres) else 0
+        finally:
+            await cerrar_motor()
+
+    return asyncio.run(ejecutar())
+
+
+def comando_digest(args: argparse.Namespace) -> int:
+    """Genera el digest del dia. Con --enviar lo manda por Telegram."""
+    from datetime import date as _date
+
+    from investing_bot.servicios.digest import (
+        ejecutar_digest_diario,
+        generar_digest,
+        persistir_digest,
+    )
+
+    fecha = _date.fromisoformat(args.fecha) if args.fecha else _date.today()
 
     async def ejecutar() -> int:
         try:
-            ingestor = IngestorPrecios(dias=args.dias)
-            resultado = await ingestor.ejecutar_registrado()
-            return 0 if resultado.exito else 1
+            if args.enviar:
+                resultado = await ejecutar_digest_diario(fecha)
+            else:
+                async with sesion_bd() as sesion:
+                    resultado = await generar_digest(sesion, fecha)
+                    if args.persistir:
+                        await persistir_digest(sesion, resultado)
+            log.info("digest_generado", fecha=str(fecha), enviado=resultado.enviado)
+            # El digest es para leerlo: va por stdout aparte de los logs.
+            sys.stdout.write(resultado.texto + "\n")
+            return 0
         finally:
             await cerrar_motor()
 
@@ -171,11 +209,17 @@ def construir_parser() -> argparse.ArgumentParser:
     p_sembrar.set_defaults(funcion=comando_sembrar)
 
     p_ingesta = sub.add_parser("ingesta", help="Corre un ingestor a mano")
-    p_ingesta.add_argument("nombre", choices=INGESTORES_DISPONIBLES)
+    p_ingesta.add_argument("nombre", choices=(*INGESTORES_DISPONIBLES, "todos"))
     p_ingesta.add_argument(
         "--dias", type=int, default=None, help="Dias de historial a traer (por defecto, config)"
     )
     p_ingesta.set_defaults(funcion=comando_ingesta)
+
+    p_digest = sub.add_parser("digest", help="Genera el digest diario")
+    p_digest.add_argument("--fecha", default=None, help="AAAA-MM-DD (por defecto, hoy)")
+    p_digest.add_argument("--enviar", action="store_true", help="Enviarlo por Telegram")
+    p_digest.add_argument("--persistir", action="store_true", help="Guardar senales y sugerencias")
+    p_digest.set_defaults(funcion=comando_digest)
 
     sub.add_parser("api", help="Levanta el dashboard").set_defaults(funcion=comando_api)
     sub.add_parser("bot", help="Levanta el bot de Telegram").set_defaults(funcion=comando_bot)

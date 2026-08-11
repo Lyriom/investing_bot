@@ -6,7 +6,7 @@ import pytest
 from telegram.ext import CommandHandler
 
 from investing_bot.config import Configuracion
-from investing_bot.telegram.bot import COMANDOS_FASE_0, construir_aplicacion
+from investing_bot.telegram.bot import COMANDOS, construir_aplicacion
 from investing_bot.telegram.handlers import esta_autorizado
 
 CHAT_AUTORIZADO = 123456789
@@ -50,13 +50,13 @@ def test_cada_comando_lleva_el_filtro_de_chat_autorizado() -> None:
     aplicacion = construir_aplicacion(_config())
     handlers = [h for h in aplicacion.handlers[0] if isinstance(h, CommandHandler)]
 
-    assert {next(iter(h.commands)) for h in handlers} == set(COMANDOS_FASE_0)
+    assert {next(iter(h.commands)) for h in handlers} == set(COMANDOS)
     for handler in handlers:
         assert handler.filters is not None
         assert CHAT_AUTORIZADO in handler.filters.chat_ids  # type: ignore[union-attr]
         assert CHAT_INTRUSO not in handler.filters.chat_ids  # type: ignore[union-attr]
 
 
-def test_fase_0_no_expone_comandos_de_fases_posteriores() -> None:
-    """El SPEC manda una fase a la vez: /hoy, /desglose y /registrar son FASE 3."""
-    assert set(COMANDOS_FASE_0) == {"start", "estado"}
+def test_estan_todos_los_comandos_del_spec() -> None:
+    """SPEC 6.5. `/registrar` va aparte: es un ConversationHandler, no un comando suelto."""
+    assert set(COMANDOS) == {"start", "estado", "hoy", "desglose", "pausar", "reanudar"}

@@ -20,10 +20,10 @@ AHORA = datetime(2026, 8, 11, 21, 0, tzinfo=UTC)
 
 
 async def test_sin_corridas_todos_los_ingestores_aparecen(sesion: AsyncSession) -> None:
-    """El dashboard lista los cuatro del SPEC, no solo el implementado."""
+    """El dashboard lista los cuatro ingestores del SPEC."""
     estados = await estado_ingestores(sesion)
     assert [e.nombre for e in estados] == list(INGESTORES_ESPERADOS)
-    assert [e.implementado for e in estados] == [True, False, False, False]
+    assert all(e.implementado for e in estados)
     assert all(e.ultima_corrida is None for e in estados)
 
 
@@ -111,7 +111,11 @@ async def test_conteos_generales(sesion: AsyncSession) -> None:
     await sesion.commit()
 
     conteos = await conteos_generales(sesion)
-    assert conteos == {"tickers_whitelist": 1, "barras_precio": 1, "ejecuciones": 0}
+    assert conteos["tickers_whitelist"] == 1
+    assert conteos["barras_precio"] == 1
+    assert conteos["ejecuciones"] == 0
+    # Las fuentes de la FASE 1 tambien se cuentan, aunque esten vacias.
+    assert {"noticias", "noticias_duplicadas", "reddit", "congreso"} <= set(conteos)
 
 
 async def test_ultimos_precios_vienen_del_mas_reciente_al_mas_antiguo(
