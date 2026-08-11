@@ -266,33 +266,99 @@ arrancar, en vez de atender a cualquiera.
 
 ---
 
-## 4. Cargar el historial y probar
+## 4. Verificación, paso a paso
 
-El planificador solo corre a sus horas. Para no esperar, abre la **terminal**
-del servicio `investing` (el icono `>_` en la barra de acciones):
+Seis comprobaciones en orden. Cada una depende de la anterior, así que si una
+falla, para ahí: las siguientes van a fallar por lo mismo.
+
+Todos los comandos van en la **terminal** del servicio `investing` (el icono
+`>_` en la barra de acciones).
+
+### 1. El proceso arrancó entero
+
+En los logs del servicio, tras el despliegue:
+
+```
+todo_en_uno_iniciado   servicios=['bot', 'planificador', 'api']
+job_registrado  id=digest_diario  proxima_ejecucion=... 18:15:00-04:00
+bot_iniciado    chat_autorizado=...
+Uvicorn running on http://0.0.0.0:8000
+```
+
+Si falta `bot` en la lista, Telegram no está configurado. Si falta
+`job_registrado`, no va a salir ningún digest.
+
+### 2. La aplicación responde y la base contesta
+
+```bash
+curl -s localhost:8000/salud
+```
+
+Debe devolver `{"estado":"ok"}`. Ese endpoint hace un `SELECT 1` de verdad, así
+que un `ok` prueba las dos cosas a la vez. Si falla aquí, el problema es
+`URL_BD`, no las claves.
+
+### 3. Los precios entran
 
 ```bash
 investing-bot ingesta precios --dias 400
 ```
 
-Tarda unos minutos. Debe terminar con `errores=0` y unas 12 000 barras (30
-instrumentos × ~400 días hábiles). Luego el resto de fuentes:
+Tarda unos minutos. Espera `errores=0` y unas 12 000 barras (30 instrumentos ×
+~400 días hábiles). **Los 400 días no son opcionales**: sin 200 barras de SPY no
+se puede medir la MA200 y el régimen sale `desconocido`.
+
+### 4. Cada fuente, por separado
+
+Una a una, para saber cuál falla:
 
 ```bash
-investing-bot ingesta todos
+investing-bot ingesta noticias
+investing-bot ingesta reddit
+investing-bot ingesta congreso
 ```
 
-Y ahora la prueba de verdad — genera el digest de hoy y **te lo manda por
-Telegram**:
+| Resultado | Qué significa |
+|---|---|
+| `filas_nuevas` > 0 | Esa fuente está viva |
+| `FINNHUB_API_KEY vacia` | Falta la clave |
+| `congreso` con 403 | Esperado hoy: la fuente está muerta |
+| `reddit` con 401 | La app existe pero la API no está aprobada |
+
+### 5. El digest se calcula
+
+Primero **sin enviar**, para leerlo:
+
+```bash
+investing-bot digest
+```
+
+Sale por pantalla. Fíjate en la línea del régimen: si dice `DESCONOCIDO`,
+faltan barras de SPY y vuelve al paso 3.
+
+`Sin sugerencias hoy` es un resultado válido — el sistema no fuerza
+operaciones. Pero si añade *«Ninguna señal tuvo datos suficientes»*, ninguna
+fuente trajo nada y el problema está en el paso 4.
+
+### 6. El mensaje llega a Telegram
 
 ```bash
 investing-bot digest --enviar
 ```
 
-Si llega el mensaje, el sistema está completo. A partir de mañana sale solo a
-las 18:15 ET sin que hagas nada.
+Si llega, el sistema está completo. Y prueba el bot desde tu móvil:
 
-Para verlo sin enviarlo, quita `--enviar`.
+```
+/start            -> vincula el chat
+/hoy              -> reenvía el digest
+/desglose NVDA    -> el detalle numérico de cada componente
+```
+
+Si el bot no contesta nada, el `chat_id` no coincide: el silencio es
+deliberado, no un error. Compruébalo con @userinfobot.
+
+A partir de aquí sale solo a las **18:15 ET (17:15 en Ecuador)**, de lunes a
+viernes.
 
 ---
 
